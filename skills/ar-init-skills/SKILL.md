@@ -58,18 +58,30 @@ Supported platforms and their directory names:
 ### Path Derivation Rules
 
 **Only store in config:**
+- `vault_root` (user-provided — the coding-tasks root itself, the parent of the platform folders)
 - `tasks_root` (user-provided, e.g., `/path/to/Backend`)
 - `docs_root` (user-provided, optional)
 - `platform` (auto-detected and stored for quick reference)
 
+**Read from config, never derive:**
+- `coding_tasks_root` = `{vault_root}`
+
+  Do **not** compute it as `dirname({tasks_root})`. That is correct only while `tasks_root`
+  sits exactly one level below the vault. A workspace that groups tasks by product before
+  platform (`{vault}/{Product}/{Platform}`) puts it two levels down, so `dirname` returns the
+  *product* folder — and every product's `TasksSummary`, `WeeklySummaries`, and review
+  artifacts then get written under whichever single product happens to be configured. The user
+  already supplies the vault root in step 3; store it rather than recovering it later.
+
 **Auto-derive at runtime:**
 From `tasks_root`:
-- `coding_tasks_root` = `dirname({tasks_root})`
 - `tasks_folder` = `{tasks_root}/OnGoingTasks`
 - `done_folder` = `{tasks_root}/DoneTasks`
-- `task_summary_folder` = `{coding_tasks_root}/TasksSummary`
-- `weekly_summaries_folder` = `{coding_tasks_root}/WeeklySummaries`
 - `platform` = `basename({tasks_root})` (also stored in config)
+
+From `vault_root`:
+- `task_summary_folder` = `{vault_root}/TasksSummary`
+- `weekly_summaries_folder` = `{vault_root}/WeeklySummaries`
 
 From `docs_root` (if provided):
 - `templates_folder` = `{docs_root}/PublishedDocs/Engineering/Templates`
@@ -241,11 +253,45 @@ Based on user input, create `.claude/skill.config`:
   "_user": "{git_user_email}",
   "_schema_version": "{framework_version}",
   "paths": {
+    "vault_root": "{user_provided_coding_tasks_root}",
     "tasks_root": "{constructed_tasks_root}",
     "docs_root": "{user_provided_docs_path_or_null}"
   }
 }
 ```
+
+`vault_root` is the path the user gave in step 3. Store it — do not make later skills recover
+it with `dirname(tasks_root)` (see "Path Derivation Rules" for why that derivation is wrong
+once a workspace nests deeper than `{vault}/{Platform}`).
+
+**This step MUST NOT overwrite an existing config.** If `.claude/skill.config` already exists,
+merge into it and preserve every key you did not ask about. A later framework version, or the
+user, may have added keys this step knows nothing about; rewriting the file wholesale discards
+them silently, and the user only finds out when behaviour they had already fixed comes back.
+
+```bash
+if [ -f .claude/skill.config ]; then
+  # Merge: values collected in this run win; every other key is preserved as-is.
+  jq --arg vault "$coding_tasks_root" \
+     --arg tasks "$tasks_root" \
+     --arg docs "$docs_root" \
+     --arg ver "$expected" \
+     '._schema_version = $ver
+      | .paths.vault_root = $vault
+      | .paths.tasks_root = $tasks
+      | .paths.docs_root = (if $docs == "" then .paths.docs_root else $docs end)' \
+     .claude/skill.config > .claude/skill.config.tmp \
+    && mv .claude/skill.config.tmp .claude/skill.config
+else
+  # Fresh install: write the template above.
+  :
+fi
+```
+
+`$expected` is the framework version read in step 1 — pass that, not an unset variable, or
+`_schema_version` lands empty and step 1's staleness check then re-runs setup on every future
+invocation. Afterwards confirm the result parses (`jq -e . .claude/skill.config`) and report
+which keys were preserved rather than rewritten.
 
 **Note:** No comments or preferences in user's config - those are internal concerns in config_hints.json.
 
@@ -271,7 +317,7 @@ Update `.claude/config_hints.json` with detected platform:
 
   "path_derivation_rules": {
     "_comment": "How to derive paths from skill.config at runtime (for documentation only)",
-    "coding_tasks_root": "dirname(tasks_root)",
+    "coding_tasks_root": "skill.config paths.vault_root — read it, never dirname(tasks_root)",
     "tasks_folder": "{tasks_root}/OnGoingTasks",
     "done_folder": "{tasks_root}/DoneTasks",
     "task_summary_folder": "{coding_tasks_root}/TasksSummary",
@@ -356,13 +402,25 @@ docs_root=$(jq -r '.paths.docs_root' .claude/skill.config)
 # Read project hints (platform, derivation rules)
 platform=$(jq -r '.platform' .claude/config_hints.json)
 
-# Derive all paths at runtime
-coding_tasks_root=$(dirname "$tasks_root")
+# Read the vault root. Do NOT use dirname "$tasks_root" — see the warning below.
+coding_tasks_root=$(jq -r '.paths.vault_root // ""' .claude/skill.config)
+[ -z "$coding_tasks_root" ] && coding_tasks_root=$(dirname "$tasks_root")
+
 tasks_folder="$tasks_root/OnGoingTasks"
 done_folder="$tasks_root/DoneTasks"
 task_summary_folder="$coding_tasks_root/TasksSummary"
 weekly_summaries_folder="$coding_tasks_root/WeeklySummaries"
 ```
+
+**Do not copy `coding_tasks_root=$(dirname "$tasks_root")` into a skill.** It holds only when
+`tasks_root` is exactly one level below the vault. A workspace nested as
+`{vault}/{Product}/{Platform}` makes that line return the *product* folder, so every product's
+`TasksSummary`, `WeeklySummaries`, and review artifacts collapse under one product. Read
+`paths.vault_root` instead. The `dirname` above is a fallback for configs written before that
+key existed, so existing installs keep working until they next re-run this skill.
+
+This block is the snippet other skills copy from, so a wrong line here propagates. Keep it
+correct.
 
 **Benefits:**
 - skill.config = user-specific, never committed

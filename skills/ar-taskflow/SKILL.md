@@ -487,13 +487,21 @@ If the user opted in (or `flow.continuous: true`), print this block right after 
    # Read project hints (platform)
    platform=$(jq -r '.platform' .claude/config_hints.json)
 
-   # Derive all paths at runtime
-   coding_tasks_root=$(dirname "$tasks_root")
+   # The vault root holds the shared rollups. Read it — do NOT derive it with
+   # dirname "$tasks_root". That holds only when tasks_root sits one level below the vault;
+   # a workspace nested as {vault}/{Product}/{Platform} makes it return the product folder,
+   # so every product's rollups collapse under whichever one is configured.
+   coding_tasks_root=$(jq -r '.paths.vault_root // ""' .claude/skill.config)
+   [ -z "$coding_tasks_root" ] && coding_tasks_root=$(dirname "$tasks_root")
+
    tasks_folder="$tasks_root/OnGoingTasks"
    done_folder="$tasks_root/DoneTasks"
    task_summary_folder="$coding_tasks_root/TasksSummary"
    weekly_summaries_folder="$coding_tasks_root/WeeklySummaries"
    ```
+
+   `TasksSummary/` and `WeeklySummaries/` are shared across everything in the workspace and
+   always live at `coding_tasks_root`, never inside a platform or product subfolder.
 
 2. **Validate and create directories**
 

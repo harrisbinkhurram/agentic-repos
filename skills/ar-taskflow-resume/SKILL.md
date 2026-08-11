@@ -111,7 +111,10 @@ Follow the rule at `<standards_location>/learning-routing.md` (resolve `standard
 
 7. **📤 Push docs on resume:** After user confirms, push any uncommitted changes in `coding_tasks_root`. Follow the full **Push-Docs Procedure** from the ar-taskflow skill, including pull-rebase and intelligent conflict resolution for `TasksSummary/*.md` and other shared files.
    ```bash
-   coding_tasks_root=$(dirname "$(jq -r '.paths.tasks_root' .claude/skill.config)")
+   # Read the vault root; dirname of tasks_root is only a fallback for pre-vault_root configs
+   # (it returns the wrong folder when a workspace nests as {vault}/{Product}/{Platform}).
+   coding_tasks_root=$(jq -r '.paths.vault_root // ""' .claude/skill.config)
+   [ -z "$coding_tasks_root" ] && coding_tasks_root=$(dirname "$(jq -r '.paths.tasks_root' .claude/skill.config)")
    # Use context message: "resume {task_name}"
    # See the ar-taskflow skill, section Docs Auto-Push, for full procedure and conflict resolution
    ```

@@ -48,11 +48,15 @@ tasks_root=$(jq -r '.paths.tasks_root' .claude/skill.config)
 docs_root=$(jq -r '.paths.docs_root' .claude/skill.config)
 
 # Derived paths
-coding_tasks_root=$(dirname "$tasks_root")
-# Planning workspace: sibling of Coding_Tasks, NOT platform-specific
-# e.g., if tasks_root = .../Example_Coding_Tasks/Backend
-#   then coding_tasks_root = .../Example_Coding_Tasks
-#   and planning_root = .../Example_Planning_Tasks
+# Read the vault root. Do NOT use dirname "$tasks_root": that holds only when tasks_root sits
+# one level below the vault. A workspace nested as {vault}/{Product}/{Platform} makes it return
+# the product folder — and the Coding_Tasks → Planning_Tasks rename below then matches nothing,
+# so planning_root silently collapses onto that product's directory.
+coding_tasks_root=$(jq -r '.paths.vault_root // ""' .claude/skill.config)
+[ -z "$coding_tasks_root" ] && coding_tasks_root=$(dirname "$tasks_root")
+# Planning workspace: sibling of Coding_Tasks, NOT platform- or product-specific
+# e.g., if coding_tasks_root = .../Example_Coding_Tasks
+#   then planning_root = .../Example_Planning_Tasks
 planning_root=$(echo "$coding_tasks_root" | sed 's/Coding_Tasks$/Planning_Tasks/')
 task_summary_folder="$coding_tasks_root/TasksSummary"
 weekly_summaries_root="$coding_tasks_root/WeeklySummaries"
