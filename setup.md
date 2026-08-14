@@ -345,13 +345,16 @@ Single-namespace:
   "test_command": "",
   "lint_command": "",
   "build_command": "",
-  "verify": { "full_command": "" }
+  "verify": { "full_command": "" },
+  "post_worktree_command": ""
 }
 ```
 
 Multi-namespace (Jira spaces): replace `project.namespace` with `default_namespace` + a `namespaces` array of `{ "prefix": "...", "name": "..." }`, and set `tracker.url`.
 
 **Field notes.** `standards_location` is the runtime seam: `ar-*` skills read it from here to find the rules (there is no install-time rewrite of skill bodies). `stack` drives the language-safety check. `test_command`, `lint_command`, `build_command`, and `verify.full_command` make skills language-neutral; leave empty when detection is ambiguous (skills then detect from the repo at runtime), never hardcode a single project's command.
+
+`post_worktree_command` runs once, right after `ar-taskflow` creates a worktree, for toolchains that must be told a new directory exists before the project can be opened or built there — an IDE or editor-hub registration, a dependency install, a local config copy. The main checkout got that setup by hand long ago; a worktree inherits none of it, and the resulting breakage is invisible until someone tries to open the thing. `{worktree_path}` in the value is replaced with the new worktree's path. Leave empty when the project needs nothing, which is the common case. NOT detected at install time: it is per-toolchain rather than per-language, so it is set deliberately or not at all.
 
 **Detect and persist a concrete `test_command` (best-effort, install AND upgrade).** Detection-driven only. Prefer a `Makefile test` target, else the language-native command for the detected tooling. Only write when the field is empty (never clobber a tuned value):
 
@@ -535,7 +538,7 @@ After adoption, skills read these from `.claude/config_hints.json` at runtime:
 - **Branch format:** `feature/{lowercase_namespace}-XXX-description`
 - **Tracker:** `tracker.type` (`tracker.url` set for jira/linear)
 - **Rules:** `standards_location`
-- **Commands:** `test_command`, `lint_command`, `build_command`, `verify.full_command` (empty means detect at runtime)
+- **Commands:** `test_command`, `lint_command`, `build_command`, `verify.full_command` (empty means detect at runtime), `post_worktree_command` (empty means nothing to do)
 
 ## Versioning
 

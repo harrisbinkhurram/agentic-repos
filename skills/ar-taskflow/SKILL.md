@@ -959,6 +959,36 @@ Once reconciliation has either chosen REUSE (skip creation) or cleared the way t
    ```
    Use the branch name from execution_plan.md header.
 
+   **Then run the project's post-worktree command, if it declares one.** A fresh worktree is a new
+   directory that some toolchains must be told about before the project can be opened or built
+   there — an IDE or editor-hub registration, a dependency install, a local config copy. The main
+   checkout got that setup once, by hand, long ago; a worktree inherits none of it, so whatever
+   the project needs is declared once in config and run here.
+
+   ```bash
+   post_worktree=$(jq -r '.post_worktree_command // ""' .claude/config_hints.json 2>/dev/null)
+   if [ -n "$post_worktree" ]; then
+     # {worktree_path} is replaced with the path the worktree helper printed.
+     cmd=${post_worktree//\{worktree_path\}/$worktree_path}
+     echo "Post-worktree setup: $cmd"
+     eval "$cmd" || echo "⚠️  Post-worktree setup FAILED — the worktree exists; finish this by hand."
+   fi
+   ```
+
+   **Report the outcome either way, and never skip it silently.** A worktree that was created but
+   not registered looks exactly like one that was, right up until someone cannot open it — the
+   failure is invisible at the moment it happens, which is what makes it worth an explicit line.
+
+   **Non-blocking.** If the command fails, say so and carry on: the branch and worktree are real
+   either way and the task should not stall on a setup step. Do not retry silently or paper over it.
+
+   Empty or absent config means there is nothing to do, which is the common case and costs nothing.
+
+   **This applies wherever a worktree is created, not only here** — including a worktree made by
+   hand outside the flow, which is the usual way one ends up unregistered. `ar-taskflow-resume`
+   does not create worktrees (it detects an existing one and points at it), so it needs no copy
+   of this step; a worktree it finds was registered when it was made.
+
 4. **Add execution tracking to `execution_plan.md` header:**
    ```markdown
    ## Execution Tracking
