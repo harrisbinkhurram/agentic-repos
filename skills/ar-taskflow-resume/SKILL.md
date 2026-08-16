@@ -22,7 +22,7 @@ Follow the rule at `<standards_location>/learning-routing.md` (resolve `standard
 
 **Steps:**
 
-1. Read `skill.config` for paths
+1. Read `skill.config` for paths, and run the zellij detection from **🪟 Pane Status** in ar-taskflow. If it is on, rename the pane as soon as the task folder is read (step 3), then follow the same per-phase renames as the phase being resumed into.
 
 2. **Ask for specific task folder path:**
    ```
@@ -148,3 +148,4 @@ See the ar-taskflow skill for:
 - Safety rules for commits
 - Coding conventions
 - Documentation requirements
+- Zellij pane-status detection, name format, and the per-phase rename table

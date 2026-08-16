@@ -27,6 +27,7 @@ standards_location=$(jq -r '.standards_location' .claude/config_hints.json)
 flow_continuous=$(jq -r '.flow.continuous // false' .claude/config_hints.json)          # true = don't ask at 4i/4j/4k; run 4l monitor after PR
 verify_pr_timeout=$(jq -r '.verify_pr.timeout_minutes // 30' .claude/config_hints.json) # max wait for CI/quality checks
 coverage_min=$(jq -r '.verify_pr.coverage_min // ""' .claude/config_hints.json)         # e.g. 80, if set, 4l flags coverage below this
+zellij_pane_status=$(jq -r '.flow.zellij_pane_status // "auto"' .claude/config_hints.json) # auto = on inside zellij; off = never
 ```
 
 **Use these variables throughout the workflow:**
@@ -363,6 +364,73 @@ This file contains:
 - How to extract ticket IDs from URLs
 - Request/response structure and error handling patterns
 
+## 🪟 Pane Status (zellij)
+
+When the session runs inside a [zellij](https://zellij.dev) pane, keep the pane name showing which task this is and what the flow is doing right now. One shell call per phase boundary. It never gates, blocks, or fails a step: if any of it errors, carry on.
+
+Controlled by `flow.zellij_pane_status` in `.claude/config_hints.json`: `auto` (default, on whenever zellij is detected) or `off`.
+
+### Detect once, at Phase 0
+
+```bash
+if [ -n "$ZELLIJ" ] && command -v zellij >/dev/null 2>&1; then
+  echo "pane-status: on (session=$ZELLIJ_SESSION_NAME pane=$ZELLIJ_PANE_ID)"
+else
+  echo "pane-status: off"
+fi
+```
+
+`$ZELLIJ` is set inside a pane and `$ZELLIJ_PANE_ID` identifies *this* pane; both are inherited by every `Bash` call. This is a check, never a question, do not ask the user whether they use zellij. Combine with the config: status is on only when zellij is detected **and** `zellij_pane_status != "off"`. Remember that verdict for the session (shell variables do not survive between `Bash` calls, the env vars above do).
+
+### Rename
+
+Run this whenever the table below says to, substituting the name. Skip it entirely when pane status is off.
+
+```bash
+zellij action rename-pane -p "$ZELLIJ_PANE_ID" "<short-name> : <doing now>" 2>/dev/null || true
+```
+
+**Always pass `-p "$ZELLIJ_PANE_ID"`.** Bare `rename-pane` renames whichever pane is *focused*, so the moment the user clicks another pane it renames theirs instead of this one. Write the flag literally: a conditional `${ZELLIJ_PANE_ID:+-p "$ZELLIJ_PANE_ID"}` collapses to the single argument `-p 3` under zsh (no word splitting) and the rename fails silently. On the rare zellij that leaves `$ZELLIJ_PANE_ID` unset, drop the flag and accept focus-targeting.
+
+**Name format:** `<Task Short Name> : <current action>`
+
+- **Task short name**, 2-4 words, decided once in Phase 0 and unchanged for the whole run. Lead with the ticket id when one exists: `FS-195 Leaderboard padding`. With no ticket, use the task-folder name.
+- **Current action**, a short present-tense phrase for what is happening now: `writing plan`, `running tests`, `waiting: plan approval`.
+- Whole string ≤ 60 chars, single line, no emoji. Pane frames truncate.
+
+### When to rename
+
+At every phase boundary, plus any in-phase step that holds the terminal for a while (a long test run, a review, a CI wait) or that hands control back to the user. Not per tool call.
+
+| Point | Action text |
+|---|---|
+| Phase 0 | `starting` |
+| Phase 1 | `understanding prompt` |
+| Phase 1 checkpoint | `waiting: prompt review` |
+| Phase 2 | `writing plan` |
+| Phase 2 checkpoint | `waiting: plan approval` |
+| Phase 3 | `coding: <current step of execution_plan.md>` |
+| 4g | `running tests` |
+| 4h | `code review` |
+| 4j | `committing` |
+| 4k | `opening PR` |
+| 4l | `PR #<n>: waiting on CI` |
+| Phase 5 | `archiving` |
+| Stopped on a question or a gate, any phase | `waiting: <what for>` |
+| Halted on a failure | `blocked: <what broke>` |
+
+### Restore
+
+At the end of Phase 5, and whenever the user aborts the flow, hand the pane back:
+
+```bash
+zellij action undo-rename-pane -p "$ZELLIJ_PANE_ID" 2>/dev/null || true
+```
+
+An explicit rename pins the name and zellij stops applying the title the running program sets; `undo-rename-pane` restores that automatic title.
+
+Manual equivalent for the user, if they want to override a name mid-run: `Ctrl+p` then `c`, type, `Enter`.
+
 ## Workflow Overview
 
 ```
@@ -474,6 +542,8 @@ If the user opted in (or `flow.continuous: true`), print this block right after 
 ## Phase 0: Choose Approach
 
 **Trigger:** User says "ar-taskflow"
+
+🪟 Run the zellij detection from **Pane Status** as the first thing in this phase, before anything else prints. If it comes back on, rename to `taskflow : starting`, then re-rename to `<Task Short Name> : starting` the moment the ticket or task folder is known (end of this phase). Fix the short name there and reuse it for every later rename.
 
 **Steps:**
 
@@ -594,6 +664,8 @@ If user chooses ticket-late:
 5. Proceed to Phase 1
 
 ## Phase 1: Prompt Understanding
+
+🪟 Pane: `understanding prompt`, then `waiting: prompt review` at the checkpoint.
 
 **After reading raw_prompt.md:**
 
@@ -761,6 +833,8 @@ Does this capture your requirements correctly?
 
 ## Phase 2: Plan
 
+🪟 Pane: `writing plan`, then `waiting: plan approval` at the checkpoint.
+
 **After user approves prompt-understanding.md:**
 
 **Runs in main session (needs deep codebase exploration).**
@@ -877,6 +951,8 @@ This is the **HUMAN GATE** described in "Running unattended with `/goal`". It st
 
 
 ## Phase 3: Code
+
+🪟 Pane: `coding: <current step of execution_plan.md>`, re-renamed as each step is checked off.
 
 **Trigger:** User says "start coding", "approved", or "looks good"
 
@@ -1147,6 +1223,8 @@ Once reconciliation has either chosen REUSE (skip creation) or cleared the way t
     ```
 
 ## Phase 4: Finish
+
+🪟 Pane: rename per sub-step, `running tests` (4g), `code review` (4h), `committing` (4j), `opening PR` (4k), `PR #<n>: waiting on CI` (4l). Use `waiting: <what for>` at each user prompt in 4i-4k.
 
 **Trigger:** User says "done", "finished", "continue", or code is complete
 
@@ -1886,6 +1964,8 @@ Each pass:
 **Why a wakeup loop, not in-turn polling (this was a real cost/fragility defect):** the prior 4l blocked a single turn for up to 30 minutes of `sleep`-and-recheck. That pinned context, paid a cold-cache read of the whole conversation on each long wait, and gave the user no clean interruption point. `/loop` + `ScheduleWakeup` is the purpose-built primitive for "wake every few minutes, check external state, act, repeat."
 
 ## Phase 5: Archive
+
+🪟 Pane: `archiving`, then run the **Restore** command as the last step of the phase.
 
 **Trigger:** User says "archive task", "move to done", or after PR is merged
 

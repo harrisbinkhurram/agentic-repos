@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.0, 2026-08-16
+
+**Summary:** ar-taskflow keeps the zellij pane name showing which task it is running and what it is doing right now, so a developer with several panes open can tell them apart at a glance.
+
+**Cost note:** One `zellij action rename-pane` call per phase boundary, plus one per execution-plan step in Phase 3. Each is a local IPC call to the running zellij session, no network and no measurable wall-clock cost. Nothing gates on it: every call is `2>/dev/null || true` and the flow continues if it fails. Off entirely outside zellij, and switchable off inside it with `flow.zellij_pane_status: "off"`.
+
+**Added:**
+- `skills/ar-taskflow/SKILL.md`, new **🪟 Pane Status (zellij)** section: environment detection (`$ZELLIJ` plus `zellij` on PATH, never a question to the user), the rename command, the `<Task Short Name> : <current action>` name format, a phase-to-action table, and the `undo-rename-pane` restore. Renames target `-p "$ZELLIJ_PANE_ID"` rather than the focused pane, so clicking into another pane cannot cause the flow to rename the user's pane instead of its own.
+- New optional config key `flow.zellij_pane_status` (`auto` default, `off` to disable), read in the Configuration block alongside the other `flow.*` settings.
+
+**Files changed:**
+- `skills/ar-taskflow/SKILL.md`, added the Pane Status section and the config read; added a one-line 🪟 cue at the head of Phases 0-5 pointing at the action to set there.
+- `skills/ar-taskflow-resume/SKILL.md`, step 1 runs the same detection and adopts the naming of whichever phase is resumed into; added to the References list.
+- `config_hints.json`, `CLAUDE.md`, `.claude-plugin/plugin.json`, version bumped to 1.2.0. `plugin.json` had drifted at 1.1.0 (v1.1.1 did not update it) and is now back in sync.
+
 ## v1.1.1, 2026-08-05
 
 **Summary:** Two bug fixes, a devkit skill name that does not exist, and a project-name normalisation that leaked whitespace into a directory name.
