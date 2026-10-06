@@ -2235,6 +2235,7 @@ When making changes after a `ar-taskflow-review` (e.g., adding doc comments, fix
 - **NEVER amend the previous commit and force push**
 - Use a descriptive message like: `[{namespace}-XXX] Address review feedback: add doc comments and clarifications`
 - Then push normally: `git push` (no `--force-with-lease`, no `--force`)
+- If the PR is already open, **re-request review** after the push, exactly as `ar-taskflow-fix-comments` Phase 4 "Re-request review" does: the previous human reviewers, or `review.default_reviewer` when there are none. A push alone does not put the PR back in anyone's queue
 
 **Why:** Force pushing rewrites remote history, can lose collaborator work, and hides the review iteration trail. Separate commits are cleaner and safer.
 

@@ -801,6 +801,44 @@ gh api graphql -f query="mutation { resolveReviewThread(input: { threadId: \"$th
 
 **CodeRabbit caveat:** the bot *sometimes* auto-resolves its own threads after acknowledging a reply (e.g. when its review-confirmation message lands) and sometimes doesn't, don't assume the bot's acknowledgment auto-resolves. Verify each thread's `isResolved` state rather than assuming.
 
+### Re-request review (after the replies are posted)
+
+Pushing fixes does not tell anyone the PR is ready to look at again. GitHub only puts it back in a reviewer's queue when review is **re-requested**. So once the fix commit is pushed and the replies are posted, re-request review from everyone who reviewed before. This runs without its own prompt: approving the replies covers it. List the reviewers it will ping in the replies preview above, so the user sees them before approving.
+
+| Situation | Re-request from |
+|---|---|
+| One or more humans submitted a review on this PR | each of them |
+| No human has reviewed yet | `review.default_reviewer` from `config_hints.json` |
+| No reviewer and no `review.default_reviewer` set | nobody, say so in the output |
+| PR is MERGED / CLOSED (fix-forward) | nobody here, the follow-up PR gets its reviewers when it is opened |
+
+Bots, the PR author and the account running this skill are always left out: GitHub refuses a review request to the author, and bots re-review on push by themselves.
+
+```bash
+pr_author=$(gh pr view "$pr_number" --json author -q .author.login)
+me=$(gh api user -q .login)
+prev_reviewers=$(gh api "repos/$repo_owner/$repo_name/pulls/$pr_number/reviews" --paginate \
+  --jq '.[] | select(.user.type == "User") | .user.login' \
+  | sort -u | grep -vx -e "$pr_author" -e "$me")
+if [ -z "$prev_reviewers" ]; then
+  default_reviewer=$(jq -r '.review.default_reviewer // empty' .claude/config_hints.json 2>/dev/null)
+  if [ -n "$default_reviewer" ] && [ "$default_reviewer" != "$pr_author" ]; then
+    prev_reviewers="$default_reviewer"
+  fi
+fi
+[ -z "$prev_reviewers" ] && echo "No reviewer to re-request (none reviewed, no usable review.default_reviewer)."
+for r in $prev_reviewers; do
+  if gh api -X POST "repos/$repo_owner/$repo_name/pulls/$pr_number/requested_reviewers" \
+       -f "reviewers[]=$r" >/dev/null; then
+    echo "Re-requested review from @$r"
+  else
+    echo "Could not re-request review from @$r"
+  fi
+done
+```
+
+Report the result in the Phase 4 output. A failed request is reported, never retried through another account.
+
 ## Phase 5, Verify (MANDATORY)
 
 **After all fixes are committed and pushed, verify nothing is broken.** Mandatory means *the change is verified*, not *this exact command is executed*. Two checks decide what running the suite actually proves here, and both come before you run anything.
@@ -1024,4 +1062,5 @@ ar-taskflow (Phase 0-4) → commit → push → create PR
 - **Test safety:** the verify command runs after every iteration whose diff it consumes (compiles, executes, lints, or validates) to catch regressions from feedback fixes. An iteration it consumes nothing from states that scope judgement instead of running it, and a suite a git hook already runs is not run a second time, two concurrent builds share one output directory and manufacture phantom failures
 - **Review safety:** the push that ends a run is what triggers the re-review of it, so Phase 6 is binding and a pending bot review is reported as `OUTSTANDING` rather than as a clean finish. A green `gh pr checks` entry and a zero unresolved count are both compatible with unreviewed code. "Pending" means `bot_state=behind`; a project with no review bot (`none`), a PR the bot declined on its own path filters (`skipped`), and a bot that paused itself (`paused`) have nothing pending and finish cleanly, reporting coverage honestly and naming the bot where there was one
 - **The round budget is configurable:** `review.max_agent_rounds` in `config_hints.json` sets how many fix rounds this skill will spend on one PR before Phase 6 stops with `ROUND CAP` (default 3). Raise it for a project whose reviewer genuinely converges; the rule behind the default is `<standards_location>/code-review.md` → "Round Budget for Agent-to-Agent Exchanges". It caps automated exchanges only and never counts a human reviewer's findings
+- **Fallback reviewer is configurable:** `review.default_reviewer` in `config_hints.json` is the GitHub login Phase 4 re-requests review from when no human has reviewed the PR yet. Unset means nobody is re-requested in that case
 - **Review bot is configurable:** `review.bot_login` in `config_hints.json` names the bot to expect (default `coderabbitai[bot]`), or `""` / `"none"` to declare the project has none. Leaving it unset costs up to 5 extra API calls per run on a repo where the default bot is absent, spent probing recent PRs, set it explicitly to skip that. `review.bot_wait_minutes` (default 10) bounds Phase 6's wait for a pending re-review
