@@ -11,7 +11,7 @@ This repository contains the SOURCE files for the Agentic Repos framework. It is
 itself: it is the AI-readiness layer (driver skills, rules, templates, procedures) that gets
 INSTALLED so other repos run a consistent, safety-checked AI workflow.
 
-Version: v1.3.0
+Version: v1.3.1
 
 ## Depends on agentic-devkit
 

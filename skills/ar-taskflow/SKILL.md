@@ -1448,6 +1448,28 @@ Once reconciliation has either chosen REUSE (skip creation) or cleared the way t
 
    Empty or absent config means there is nothing to do, which is the common case and costs nothing.
 
+   **Then make sure new worktrees will not prompt for file access.** A session started in one
+   checkout asks for permission on every read and edit in a worktree outside it. Listing the
+   machine's worktree root under `permissions.additionalDirectories` in the user's Claude settings
+   covers every worktree created there later. The root is different on every machine, so it is
+   never committed to the project; it is checked here and added only with the user's yes.
+
+   ```bash
+   access="${AGENTIC_DEVKIT_DIR:-$HOME/agentic-devkit}/scripts/a_s_worktree_access.sh"
+   [ -f "$access" ] && bash "$access" check "$worktree_path"
+   # prints "covered <root>" (exit 0) or "missing <root>" (exit 10)
+   ```
+
+   - `covered`, or the script is absent (an older agentic-devkit): say nothing and carry on.
+   - `missing <root>`: ask once, with `<root>` written using `~/` for the home folder:
+
+     > New worktrees under `<root>` will ask for permission each time. Add this folder to your Claude settings so they don't? (yes/no)
+
+     On yes, run `bash "$access" add "<root>"` and report the line it prints. It takes effect
+     from the next session. On no, carry on and do not ask again in this run.
+
+   Never add the folder without a yes, and never write it into the project's settings.
+
    **This applies wherever a worktree is created, not only here** — including a worktree made by
    hand outside the flow, which is the usual way one ends up unregistered. `ar-taskflow-resume`
    does not create worktrees (it detects an existing one and points at it), so it needs no copy

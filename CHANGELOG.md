@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.1, 2026-10-11
+
+**Summary:** `ar-taskflow` checks, after creating a worktree, that the machine's worktree root is
+listed in the user's Claude settings, and offers to add it, so new worktrees stop asking for file
+access one by one.
+
+**Cost note:** One script call per created worktree. A question is asked only when the root is
+missing, and at most once per run.
+
+**Changed:**
+- `skills/ar-taskflow/SKILL.md`: after the post-worktree command, run agentic-devkit's
+  `scripts/a_s_worktree_access.sh check` on the new worktree. When the root is missing, ask before
+  running its `add`. The helper resolves the root (`<repos>/WorkTrees` for the worktree helper's
+  layout, else the worktree's parent) and edits only the user's settings, never the project's.
+  Needs an agentic-devkit that ships the helper; with an older one the step is skipped.
+
 ## v1.3.0, 2026-10-10
 
 **Summary:** `ar-taskflow-v2`, an opt-in second version of the task flow. It reads v1 and layers six
