@@ -1207,7 +1207,7 @@ Does this capture your requirements correctly?
 **Steps:**
 1. Read prompt-understanding.md
 2. Explore codebase to understand structure
-3. Read applicable coding rules
+3. Read applicable coding rules, applying any `<!-- lesson: ... -->` line per `learning-routing.md` → Reading lessons
 4. Design implementation approach
 5. Create execution_plan.md with:
    - Summary
@@ -1495,6 +1495,8 @@ Once reconciliation has either chosen REUSE (skip creation) or cleared the way t
    - `critical-thinking.md` - Challenge assumptions, verify against codebase
    - `test-change-policy.md` - When tests may change (Change Class taxonomy + regression-oracle + diagnosis fork)
    - `test-scope-policy.md` - What a test asserts (observable contract, not implementation or framework guarantees)
+
+   A rule carrying a `<!-- lesson: ... -->` line is applied per `learning-routing.md` → Reading lessons: only inside its scope, proposed for retirement when its retire-when holds, flagged when this task contradicts it.
 
    **Task-specific rules (from prompt-understanding.md):**
    - Read the `## Applicable Rules` section in `prompt-understanding.md`
@@ -1945,7 +1947,7 @@ After verifying documentation:
 
 **Important:**
 - Force a fresh run if the project's test runner caches results
-- If tests fail → STOP, fix the issues first
+- If tests fail → STOP, fix the issues first. A failure in a test that Phase 3's targeted runs or an AC verification had passed is classified per `<standards_location>/failure-classification.md` before the fix.
 - If tests pass **but a suite was skipped** → this is NOT a clean green. Run the named suite (or `verify.full_command`) before declaring done, or tell the user exactly which suite is unverified.
 - If tests pass and nothing was skipped → Proceed to code review
 - Never commit with failing tests
@@ -2054,6 +2056,8 @@ Approve to commit?
 - Yes → Proceed to get ticket number
 - No → Make additional changes
 ```
+
+**In both modes,** a listed issue that is a real defect, not style or readability, is classified per `<standards_location>/failure-classification.md` before it is fixed: the AC gate had already accepted this code.
 
 **Autonomous mode (`flow_autonomous` = true, opt-in):** act on the verdict, do not prompt.
 - **APPROVED** → proceed straight to commit (get ticket number).

@@ -25,7 +25,8 @@ classification line per fixed defect; rules files gain a metadata line only when
 
 **Changed:**
 - `skills/ar-taskflow/SKILL.md`: a Version Select section routes to v2 on a `v2` argument or
-  `flow.version: 2`.
+  `flow.version: 2`. Phase 2 and Phase 3 apply lesson lines when reading rules; 4g and 4h classify
+  a defect found after an earlier check had passed.
 - `skills/ar-taskflow-resume/SKILL.md`: resumes under v2 when `execution-summary.md` records
   `Flow version: 2`; classifies a previously-green criterion that now fails.
 - `skills/ar-taskflow-fix-comments/SKILL.md`: classifies each real defect before fixing it (Phase 2),
