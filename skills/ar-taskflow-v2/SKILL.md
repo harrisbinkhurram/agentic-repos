@@ -183,57 +183,21 @@ plausible divergent reading of the prompt not probed?"
 
 ## D4. Failure classification
 
-**Applies whenever a defect surfaces after a check had accepted the work:** a real-bug review
-comment or failed check in 4l or `ar-taskflow-fix-comments`, CI red after local green, a resumed
-task whose previously-green criterion fails, or a defect reported against the change after merge.
+Follow `<standards_location>/failure-classification.md`, which v1 also applies. v2 adds:
 
-Before fixing, classify it:
-
-| Class | Meaning | Repair, in this order |
-|---|---|---|
-| `implementation` | the code breaks a stated criterion under a stated assumption | add a check that fails on it, then fix the code |
-| `requirement` | the code meets the criteria, the criteria missed what the stakeholder wanted | Change Log + approved AC row, its check, then the code |
-| `environment` | the real environment differs from an Environment Assumption, or one was missing | add or correct the EA row, raise the affected rows' `required_tier`, add a check that exercises it, then the code |
-| `evaluator` | a check that should have caught it did not (too weak, wrong tier, skipped, or not run) | strengthen that check so it fails on the defect, then the code |
-
-In 4l, classify the actionable findings before invoking `ar-taskflow-fix-comments`: make the
-non-code repairs first, then let it fix the code and resolve the threads. A defect can be more than
-one class: apply every row. Record each in
-`{task_folder}/failure-log.md`:
-
-```markdown
-| Date | Source | What happened | Class | Artifact revised | Evidence |
-|---|---|---|---|---|---|
-```
-
-A fix that only changes code for a `requirement`, `environment`, or `evaluator` defect is
-incomplete: the same gap admits the next defect.
-
-**After merge (Phase 5 or later):** when the user reports how the change behaved in use, with the
-task folder, read the task files, classify, append to `failure-log.md`, and if code must change,
-start a new v2 task whose `raw_prompt.md` cites the original task folder and the failure-log row.
+- In 4l, classify the actionable findings before invoking `ar-taskflow-fix-comments`, so the
+  non-code repairs land first.
+- An `environment` defect adds or corrects an `## Environment Assumptions` row and raises the
+  affected criteria's `required_tier` (D1).
+- An `evaluator` defect whose check sat below its row's `required_tier` is fixed by raising the
+  check's tier, not only its strictness.
 
 ## D5. Lessons with scope and retirement
 
-Extends `learning-routing.md` destination 1 (project rule).
-
-A rule written from a v2 run carries one metadata line directly under it:
-
-```markdown
-<!-- lesson: scope={paths, modules, or feature area}; evidence={task folder or PR}; retire-when={observable condition} -->
-```
-
-- `scope` limits where the rule applies. A rule with no stated scope is project-wide; say so.
-- `retire-when` is something a later run can check, such as "the upstream API supports pagination"
-  or "module X is removed". "Never" is allowed only for a stable project convention.
-
-**Propose a lesson** when `failure-log.md` shows the same class in the same area twice, in this
-task or across archived tasks in `{done_folder}`.
-
-**Phase 2 step 3 addition:** while reading applicable rules, check each in-scope lesson's
-`retire-when`. If it is observably met, propose retiring the rule. Retire on user approval only.
-If evidence in this task contradicts a lesson, say so and propose narrowing or replacing it; never
-silently follow or silently ignore it.
+Follow the lesson metadata and lesson reading in `<standards_location>/learning-routing.md`,
+which v1 also applies. v2 adds: when Phase 2 reads applicable rules, also count `failure-log.md`
+classes across this task and the archived tasks in `{done_folder}`, and propose a lesson for any
+class that has recurred in the area this plan touches.
 
 ## D6. Risk-scaled verification
 

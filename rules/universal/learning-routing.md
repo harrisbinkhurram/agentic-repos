@@ -28,6 +28,24 @@ When a learning surfaces during a task-flow skill, route it explicitly. There is
 3. On user approval, edit the file and commit it on the feature branch alongside the code change.
 4. Mention the rule edit in the PR description so reviewers see the convention change in context.
 
+**Lesson metadata.** A rule added this way carries one line directly under it:
+
+```markdown
+<!-- lesson: scope={paths, modules, or feature area}; evidence={task folder or PR}; retire-when={observable condition} -->
+```
+
+- `scope` limits where the rule applies. Write `project-wide` when it is.
+- `retire-when` is something a later run can check, such as "the upstream API paginates" or
+  "module X is removed". `never` only for a stable project convention.
+- Existing rules without the line keep working. Add it when a rule is next edited.
+
+**Reading lessons.** Whenever a skill reads `<standards_location>/` to apply rules:
+
+- Apply a lesson only inside its `scope`.
+- If its `retire-when` is observably met, propose retiring the rule. Retire on approval only.
+- If evidence in the current work contradicts a lesson, say so and propose narrowing or
+  replacing it. Never silently follow it, never silently ignore it.
+
 **Why this destination:** the rule persists in the codebase, is visible in PR review, applies to every teammate, and survives session boundaries.
 
 ### 2. Framework improvement

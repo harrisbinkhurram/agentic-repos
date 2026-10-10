@@ -3,26 +3,35 @@
 ## v1.3.0, 2026-10-10
 
 **Summary:** `ar-taskflow-v2`, an opt-in second version of the task flow. It reads v1 and layers six
-deltas on named steps, so v1 fixes reach v2 without a copy. v1 stays the default.
+deltas on named steps, so v1 fixes reach v2 without a copy. v1 stays the default. Two of the deltas,
+failure classification and scoped lessons, ship as shared rules that v1 applies too.
 
-**Cost note:** Nothing changes for a project until it runs `ar-taskflow v2` or sets
+**Cost note:** The v2 deltas are inert until a project runs `ar-taskflow v2` or sets
 `flow.version: 2`. A v2 run adds two fresh-context subagents per task (test sealing, intent-defeat
-review) and up to four probe questions in Phase 1.
+review) and up to four probe questions in Phase 1. In v1, `ar-taskflow-fix-comments` adds one
+classification line per fixed defect; rules files gain a metadata line only when a rule is written.
 
 **Added:**
 - `skills/ar-taskflow-v2/SKILL.md`: D1 environment assumptions and per-criterion evidence tiers
   (`tier`, `required_tier`) with an evidence-ceiling report in the PR; D2 acceptance tests sealed by
   an independent subagent before Phase 3, fingerprinted and gated, plus an intent-defeat review
   before 4h; D3 intent probes in Phase 1; D4 failure classification (implementation, requirement,
-  environment, evaluator) with `failure-log.md`; D5 lesson metadata (scope, evidence, retire-when)
-  on rules written from a run; D6 a Risk block that raises verification for high-risk changes.
+  environment, evaluator) and D5 scoped lessons, both extending the shared rules below with
+  v2's tiers and failure-log recurrence counting; D6 a Risk block that raises verification for high-risk changes.
+- `rules/universal/failure-classification.md`: classify a defect that got past a check as
+  implementation, requirement, environment, or evaluator; repair the artifact that admitted it
+  before the code; record it in the task's `failure-log.md`; recurrence is a lesson candidate.
 - Optional config keys `flow.version`, `flow.risk_surfaces`, `verify.target_command`.
 
 **Changed:**
 - `skills/ar-taskflow/SKILL.md`: a Version Select section routes to v2 on a `v2` argument or
   `flow.version: 2`.
 - `skills/ar-taskflow-resume/SKILL.md`: resumes under v2 when `execution-summary.md` records
-  `Flow version: 2`.
+  `Flow version: 2`; classifies a previously-green criterion that now fails.
+- `skills/ar-taskflow-fix-comments/SKILL.md`: classifies each real defect before fixing it (Phase 2),
+  reports the classes (Phase 3), writes lesson metadata and counts recurring classes (Phase 7).
+- `rules/universal/learning-routing.md`: lesson metadata (scope, evidence, retire-when) on rules it
+  writes, and scope, retirement, and contradiction checks when rules are read.
 - `settings.json`, `templates/settings.template.json`: allow `Skill(ar-taskflow-v2)`.
 - `GUIDE.md`: lists `ar-taskflow-v2`.
 

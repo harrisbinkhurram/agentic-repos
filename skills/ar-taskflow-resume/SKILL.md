@@ -76,6 +76,8 @@ Follow the rule at `<standards_location>/learning-routing.md` (resolve `standard
    I'll work on these first. OK?
    ```
 
+   A previously-green criterion that now fails is classified per `<standards_location>/failure-classification.md` before it is fixed.
+
    **If everything is green:** state it explicitly ("Baseline green: N/N criteria still pass, smoke tests pass"), then proceed to the next failing criterion.
 
    **Manual Override:** If user says "skip smoke test", **hold the note in memory, do not write it yet.** Step 6 promises that a declined resume leaves no trace in `execution-summary.md`, and the user can skip the smoke test and then answer "no" at Step 6, by which point a note written here already claims a resume that never happened, which the next resume reads as a real unverified baseline. Write it in Step 7, once the resume is confirmed: `Last Action: resumed without smoke test (user override)` so the next resume knows the baseline is unverified.

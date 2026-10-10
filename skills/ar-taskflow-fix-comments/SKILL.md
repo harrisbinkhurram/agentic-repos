@@ -604,6 +604,8 @@ Processing in priority order...
 
 ## Phase 2, Fix in Priority Order
 
+**Classify every real defect before fixing it**, per `<standards_location>/failure-classification.md`: make the non-code repairs its class requires first (requirement, assumption, or check), then fix the code, and record it where that rule says. Style and readability findings are not classified. If the file is missing, the project predates framework v1.3.0: fix as below and say once in the Phase 3 report that `ar-upgrade` adds it.
+
 ### Priority 1: SonarQube (highest confidence)
 
 SonarQube issues have precise rule IDs and locations. Fix strategy by category:
@@ -695,6 +697,11 @@ Round Number and Same-Class Detection:}
 {warning_emoji} {class}, earlier findings {comment ids}, needs {an approach change | one
 source of truth for this value | a scope split}
 {If none:} none, no finding class has repeated on this PR
+
+### Failure classes ({n})
+{For each classified defect:}
+{file}:{line}, {class}, revised: {artifact other than the code, or "code only"}
+{If none:} none, no fixed finding was a defect
 
 ---
 
@@ -1012,7 +1019,7 @@ For each genuinely-fixed finding:
 1. **Extract the durable lesson:** the generalizable rule behind the fix (a quality-gate rule ID, a bot's recurring pattern, a reviewer convention), distinct from the ticket-specific code change.
 2. **Check existing coverage.** Look in `<standards_location>/` for a rule that already teaches it. A rule that names the ID in a heading but never explains the pattern or shows the fix is still a **gap**.
 3. **Close a real gap only**, routing per `<standards_location>/learning-routing.md`:
-   - **Project convention** → propose a concise rule update under `<standards_location>/`; on approval, commit it on the PR branch.
+   - **Project convention** → propose a concise rule update under `<standards_location>/`, with the lesson metadata line `learning-routing.md` defines; on approval, commit it on the PR branch. A class that recurs per `failure-classification.md` → Recurrence counts as recurring here.
    - **Framework defect** → invoke `ar-record-improvement` instead (never hand-edit the framework).
    - **One-off / niche** → conversational note only; write no rule.
 
