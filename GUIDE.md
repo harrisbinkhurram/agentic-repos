@@ -120,6 +120,7 @@ Companion skills:
 
 - `ar-taskflow-planner`: plan only.
 - `ar-taskflow-resume`: continue a task in a new session (reads the task's summary and picks up from the last phase).
+- `ar-taskflow-v2`: opt-in v2 of the flow: intent probes, environment assumptions with evidence tiers, sealed acceptance tests, an intent-defeat review, risk-scaled verification, and failure classification. Run `ar-taskflow v2`, or set `flow.version: 2` in `config_hints.json`. v1 stays the default.
 - `ar-taskflow-remember`: refresh context in the same session (re-reads the task files and rules).
 - `ar-taskflow-review`: review the change before commit.
 - `ar-taskflow-fix-comments`: address PR review comments.

@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.3.0, 2026-10-10
+
+**Summary:** `ar-taskflow-v2`, an opt-in second version of the task flow. It reads v1 and layers six
+deltas on named steps, so v1 fixes reach v2 without a copy. v1 stays the default.
+
+**Cost note:** Nothing changes for a project until it runs `ar-taskflow v2` or sets
+`flow.version: 2`. A v2 run adds two fresh-context subagents per task (test sealing, intent-defeat
+review) and up to four probe questions in Phase 1.
+
+**Added:**
+- `skills/ar-taskflow-v2/SKILL.md`: D1 environment assumptions and per-criterion evidence tiers
+  (`tier`, `required_tier`) with an evidence-ceiling report in the PR; D2 acceptance tests sealed by
+  an independent subagent before Phase 3, fingerprinted and gated, plus an intent-defeat review
+  before 4h; D3 intent probes in Phase 1; D4 failure classification (implementation, requirement,
+  environment, evaluator) with `failure-log.md`; D5 lesson metadata (scope, evidence, retire-when)
+  on rules written from a run; D6 a Risk block that raises verification for high-risk changes.
+- Optional config keys `flow.version`, `flow.risk_surfaces`, `verify.target_command`.
+
+**Changed:**
+- `skills/ar-taskflow/SKILL.md`: a Version Select section routes to v2 on a `v2` argument or
+  `flow.version: 2`.
+- `skills/ar-taskflow-resume/SKILL.md`: resumes under v2 when `execution-summary.md` records
+  `Flow version: 2`.
+- `settings.json`, `templates/settings.template.json`: allow `Skill(ar-taskflow-v2)`.
+- `GUIDE.md`: lists `ar-taskflow-v2`.
+
 ## v1.2.0, 2026-09-17
 
 **Summary:** Codex support from the same files Claude Code reads, a git safety guard that covers what

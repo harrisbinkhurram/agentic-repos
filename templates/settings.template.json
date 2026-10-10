@@ -4,6 +4,7 @@
     "defaultMode": "acceptEdits",
     "allow": [
       "Skill(ar-taskflow)",
+      "Skill(ar-taskflow-v2)",
       "Skill(ar-taskflow-fix-comments)",
       "Skill(ar-taskflow-review)",
       "Skill(ar-taskflow-resume)",

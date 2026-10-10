@@ -8,6 +8,17 @@ disable-model-invocation: true
 
 Structured workflow: Raw Prompt → Understand → Plan → Code → Document
 
+## 🔀 Version Select
+
+Run v1 (this file) unless one of these holds, in which case invoke the `ar-taskflow-v2` skill with
+the remaining arguments and stop reading this file:
+
+- the arguments include `v2`;
+- `.claude/config_hints.json` sets `flow.version` to `2`
+  (`jq -r '.flow.version // 1' .claude/config_hints.json`).
+
+An explicit `v1` argument overrides the config.
+
 ## 🔧 Configuration
 
 **IMPORTANT:** This skill uses project-specific configuration from `.claude/config_hints.json`.
