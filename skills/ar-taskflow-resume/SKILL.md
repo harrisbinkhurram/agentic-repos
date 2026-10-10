@@ -40,7 +40,8 @@ Follow the rule at `<standards_location>/learning-routing.md` (resolve `standard
    - `execution-summary.md` (if exists - prioritize this for state)
 
    **Flow version:** if `execution-summary.md` has `- **Flow version:** 2`, resume under
-   `ar-taskflow-v2`: read that skill and apply its deltas to every step below and to the phase you
+   `ar-taskflow-v2`: read `ar-taskflow-v2/SKILL.md` from the sibling directory of this skill's base
+   directory and apply its deltas to every step below and to the phase you
    resume into. Otherwise resume under `ar-taskflow`.
 
 4a. **Determine current phase:**

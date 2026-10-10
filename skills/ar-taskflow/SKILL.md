@@ -10,8 +10,9 @@ Structured workflow: Raw Prompt → Understand → Plan → Code → Document
 
 ## 🔀 Version Select
 
-Run v1 (this file) unless one of these holds, in which case invoke the `ar-taskflow-v2` skill with
-the remaining arguments and stop reading this file:
+Run v1 (this file) unless one of these holds, in which case read `ar-taskflow-v2/SKILL.md` from the
+sibling directory of this skill's base directory, follow it with the remaining arguments, and stop
+reading this file:
 
 - the arguments include `v2`;
 - `.claude/config_hints.json` sets `flow.version` to `2`
