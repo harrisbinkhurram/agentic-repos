@@ -10,7 +10,7 @@ Mandatory step before a finding is added to the draft. Silently flagging pre-exi
 
 ## Procedure
 
-For each potential issue you've identified, before drafting a comment. Every fence below starts by loading the run state (`SKILL.md` → Phase 0, Run state), which sets `WORKTREE_DIR` and `BASE_BRANCH`; the two lines are shown once, in step 2.
+For each potential issue you've identified, before drafting a comment. Every fence below starts by loading the run state (`SKILL.md` → Phase 0, Run state), which sets `WORKTREE_DIR` and `BASE_BRANCH`.
 
 1. **Name the relevant symbol**, the function, variable, pattern, or filename the issue centers on. Be specific. "The validation logic" is not specific enough; `OrderItemValidator.validateItem` is.
 
@@ -29,13 +29,12 @@ For each potential issue you've identified, before drafting a comment. Every fen
 
 3. **Does the same pattern appear in unchanged sibling files?**
 
-   List the files the PR touched:
+   List the files the PR touched, then grep for the pattern in everything EXCEPT those files. One fence: an empty list would exclude nothing and count the PR's own files as unchanged code.
    ```bash
+   AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+   . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
    touched=$(git -C "$WORKTREE_DIR" diff --name-only "origin/$BASE_BRANCH...HEAD")
-   ```
-
-   Grep for the pattern in everything EXCEPT those files:
-   ```bash
+   [ -n "$touched" ] || { echo "No changed files resolved; classification not run." >&2; exit 1; }
    git -C "$WORKTREE_DIR" grep -n "<pattern>" -- \
      $(printf ':!%s ' $touched)
    ```
@@ -47,6 +46,8 @@ For each potential issue you've identified, before drafting a comment. Every fen
 4. **Sweep the PR for every instance of the same shape** (PR-INTRODUCED and PR-EXPOSED findings). Name the finding's shape as the installed code-review rule defines a class ("X is missing from list Y", "the number in A disagrees with the number in B", "case Z is not handled", "the same function or block"), then search the PR's changed files and the code paths they call for every other instance of it: the sibling branch of the same guard, the parallel copy of the same logic, the same claim restated in another file.
 
    ```bash
+   AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+   . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
    # Recomputed here: step 3 is skipped on the PR-INTRODUCED path, and an empty list would grep the whole repo.
    touched=$(git -C "$WORKTREE_DIR" diff --name-only "origin/$BASE_BRANCH...HEAD")
    [ -n "$touched" ] || { echo "No changed files resolved; sweep not run." >&2; exit 1; }

@@ -242,8 +242,15 @@ fi
 INPUT="$PR_NUMBER" source "$WT_DIR/a_g_worktree_review" "$PR_NUMBER"
 # That cd's us into the new review worktree at:
 #   /(dirname REPO_DIR)/WorkTrees/$REPO/review-pr-$PR_NUMBER/
-# Capture it, and make every later fence start there:
+# Capture it, and make every later fence start there. The helper returns without a cd when
+# the worktree or its branch already exists, or when it cancels on a closed PR, so check that
+# this is a worktree other than the main clone and that it sits at the pinned head.
 WORKTREE_DIR="$(pwd)"
+if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+    echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
+    echo "    A stale one from an earlier run: a_g_worktree_remove --force review-pr-$PR_NUMBER, then re-run Phase 2." >&2
+    exit 1
+fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
 ```
 
@@ -260,7 +267,11 @@ if [ ! -d "$WORKTREE_DIR" ]; then
     # Check out the pinned head commit, not the mutable origin/$HEAD_BRANCH.
     git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA"
 fi
-cd "$WORKTREE_DIR"
+cd "$WORKTREE_DIR" || exit 1
+if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+    echo "❌ $WORKTREE_DIR is not at the PR head $HEAD_SHA (a stale worktree from an earlier run?)." >&2
+    exit 1
+fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
 ```
 
@@ -537,6 +548,16 @@ TEST_LOG="$REVIEW_DIR/test-run.log"
 TEST_VERDICT="not-run"
 TESTS_RAN=false
 
+# Phase 4 runs in the background too and records SETUP_SUCCESS only when it ends. Wait for it,
+# bounded by its own 300s ceiling, re-reading the state; without the wait this fence reads an
+# unset value and never runs the tests.
+for _ in $(seq 1 330); do
+    [ -n "${SETUP_SUCCESS:-}" ] && break
+    sleep 1
+    . "$AR_STATE"
+done
+[ -n "${SETUP_SUCCESS:-}" ] || echo "→ Setup did not report within 330s; tests not run." >&2
+
 if [ "$SETUP_SUCCESS" = true ]; then
     {
         echo "=== Test run: $(date) ==="
@@ -702,19 +723,19 @@ Skip this check for high-confidence + high-impact findings (NPE, security, data 
 
 This is where the model does the actual reading and reasoning. Invoke the `a_sag_code_reviewer` agent if available; otherwise reason inline.
 
-**Prompt for the reviewer (you, the model, OR a subagent):**
+**Prompt for the reviewer (you, the model, OR a subagent):** the `{…}` values are filled in before the prompt is used, from the run state (`cat "$AR_STATE"` after loading it) and from the SKIP section of `{REVIEW_DIR}/project-rules-summary.md`. A subagent receives the filled-in text; it has no access to the state.
 
 ```
 You are reviewing PR #{PR_NUMBER} on {OWNER}/{REPO}: "{PR_TITLE}".
 
 INPUTS:
-  - Diff:                   $REVIEW_DIR/review.diff
-  - PR metadata:            $REVIEW_DIR/pr-meta.json
-  - Project rules summary:  $REVIEW_DIR/project-rules-summary.md
-  - Existing comments:      $REVIEW_DIR/existing-comments.json + existing-comments-issue.json
-  - Setup log:              $REVIEW_DIR/env-setup.log
-  - Test results log:       $REVIEW_DIR/test-run.log (verdict: $TEST_VERDICT)
-  - Working tree:           $(pwd)  (you may open and read any file)
+  - Diff:                   {REVIEW_DIR}/review.diff
+  - PR metadata:            {REVIEW_DIR}/pr-meta.json
+  - Project rules summary:  {REVIEW_DIR}/project-rules-summary.md
+  - Existing comments:      {REVIEW_DIR}/existing-comments.json + existing-comments-issue.json
+  - Setup log:              {REVIEW_DIR}/env-setup.log
+  - Test results log:       {REVIEW_DIR}/test-run.log (verdict: {TEST_VERDICT})
+  - Working tree:           {WORKTREE_DIR}  (you may open and read any file)
 
 REVIEW SCOPE, focus on:
   - Logical bugs introduced by the diff
@@ -726,7 +747,7 @@ REVIEW SCOPE, focus on:
   - Documentation drift (changed behaviour, docs still describe old)
 
 REVIEW SCOPE, explicitly SKIP (covered by existing automated reviewers):
-$(cat $REVIEW_DIR/project-rules-summary.md | sed -n '/Categories this review will SKIP/,/^##/p')
+{the "Categories this review will SKIP" section of {REVIEW_DIR}/project-rules-summary.md}
 
 CLASSIFICATION (mandatory per Phase 6.5, see checks/classifier.md):
   - Tag each potential finding as PR-INTRODUCED, PR-EXPOSED, or PRE-EXISTING.
@@ -751,7 +772,7 @@ AUTHOR INTENT (mandatory per Phase 6.6, see checks/author-intent.md):
     security, data corruption).
 
 SELF-REVIEW MODE (set in Phase 0):
-  - SELF_REVIEW=$SELF_REVIEW
+  - SELF_REVIEW={SELF_REVIEW}
   - If true: ask "what would a skeptical teammate who DOESN'T know your intent ask?"
     rather than "find bugs". Lower the threshold for small things, no second pair of eyes.
 
@@ -767,8 +788,8 @@ DEDUP + CROSS-REFERENCE, for each potential comment, before drafting it:
      already holds two findings of that class, the Approach comment says so and asks
      for the approach to change. A stream of correct instances is what spends the
      round budget.
-  3b. ROUND BUDGET: this is review round $REVIEW_ROUND of $MAX_ROUNDS from this account.
-     When $REVIEW_ROUND is above $MAX_ROUNDS, produce NO findings: the draft holds a
+  3b. ROUND BUDGET: this is review round {REVIEW_ROUND} of {MAX_ROUNDS} from this account.
+     When {REVIEW_ROUND} is above {MAX_ROUNDS}, produce NO findings: the draft holds a
      single review-body summary, the recurring class, why instances do not close it,
      the alternative, and that a human decides whether the PR continues, splits or
      changes approach, and Phase 9 posts it as the review body with no inline comments.
@@ -807,7 +828,7 @@ COMMENT FORMAT, each comment is a markdown body with this shape:
   {OPTIONAL: a brief AI-prompt the human can copy if they want Claude to fix
    it for them. Keep it small, 1-2 sentences max.}
 
-OUTPUT, write your review as a markdown file at $REVIEW_DIR/review-draft.md
+OUTPUT, write your review as a markdown file at {REVIEW_DIR}/review-draft.md
 in this shape:
 
   # Review: PR #{N}, {title}
