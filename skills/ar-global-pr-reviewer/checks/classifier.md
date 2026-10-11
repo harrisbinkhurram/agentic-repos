@@ -33,12 +33,13 @@ For each potential issue you've identified, before drafting a comment. Every fen
    ```bash
    AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
    . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
-   touched=$(git -C "$WORKTREE_DIR" -c core.quotePath=false diff --name-only "origin/$BASE_BRANCH...HEAD")
-   [ -n "$touched" ] || { echo "No changed files resolved; classification not run." >&2; exit 1; }
-   # One literal pathspec per file, built into "$@": zsh does not word-split an unquoted $touched,
-   # git quotes non-ASCII names unless core.quotePath=false, and a plain pathspec is a glob.
+   # One literal pathspec per changed file, built into "$@". The list is NUL-separated because
+   # git C-quotes names holding non-ASCII bytes, quotes, backslashes or control characters, zsh
+   # does not word-split an unquoted variable, and a plain pathspec is a glob.
    set --
-   while IFS= read -r f; do [ -n "$f" ] && set -- "$@" ":(exclude,literal)$f"; done < <(printf '%s\n' "$touched")
+   while IFS= read -r -d '' f; do set -- "$@" ":(exclude,literal)$f"; done \
+     < <(git -C "$WORKTREE_DIR" diff -z --name-only "origin/$BASE_BRANCH...HEAD")
+   [ "$#" -gt 0 ] || { echo "No changed files resolved; classification not run." >&2; exit 1; }
    git -C "$WORKTREE_DIR" grep -n "<pattern>" -- "$@"
    ```
 
@@ -51,11 +52,12 @@ For each potential issue you've identified, before drafting a comment. Every fen
    ```bash
    AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
    . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
-   # Recomputed here: step 3 is skipped on the PR-INTRODUCED path, and an empty list would grep the whole repo.
-   touched=$(git -C "$WORKTREE_DIR" -c core.quotePath=false diff --name-only "origin/$BASE_BRANCH...HEAD")
-   [ -n "$touched" ] || { echo "No changed files resolved; sweep not run." >&2; exit 1; }
+   # Rebuilt here, as in step 3: step 3 is skipped on the PR-INTRODUCED path, and an empty list
+   # would grep the whole repo.
    set --
-   while IFS= read -r f; do [ -n "$f" ] && set -- "$@" ":(literal)$f"; done < <(printf '%s\n' "$touched")
+   while IFS= read -r -d '' f; do set -- "$@" ":(literal)$f"; done \
+     < <(git -C "$WORKTREE_DIR" diff -z --name-only "origin/$BASE_BRANCH...HEAD")
+   [ "$#" -gt 0 ] || { echo "No changed files resolved; sweep not run." >&2; exit 1; }
    git -C "$WORKTREE_DIR" grep -n "<pattern>" -- "$@"
    ```
 

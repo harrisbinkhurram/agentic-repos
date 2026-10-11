@@ -247,9 +247,15 @@ INPUT="$PR_NUMBER" source "$WT_DIR/a_g_worktree_review" "$PR_NUMBER"
 # this is a worktree other than the main clone and that it sits at the pinned head.
 WORKTREE_DIR="$(pwd)"
 if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+    # The remove command, runnable as printed: the helper's shell function does not exist in a
+    # non-interactive shell, and the script must run inside the clone.
+    WT_PATH="$GLOBAL_ROOT/repos/$OWNER/WorkTrees/$REPO/review-pr-$PR_NUMBER"
+    RM_CMD="cd \"$REPO_DIR\" && bash \"${AGENTIC_DEVKIT_DIR:-$HOME/agentic-devkit}/scripts/a_g_worktree_remove\" --force review-pr-$PR_NUMBER"
+    RM_FALLBACK="git -C \"$REPO_DIR\" worktree remove --force \"$WT_PATH\"; git -C \"$REPO_DIR\" branch -D review-pr-$PR_NUMBER"
     echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
-    echo "    If a review-pr-$PR_NUMBER worktree or branch exists from an earlier run: a_g_worktree_remove --force review-pr-$PR_NUMBER, then re-run Phase 2." >&2
-    echo "    For a closed, merged or fork PR, which the helper cannot check out: remove whatever it left (same command), then use the inline fence below, which checks out the pinned head." >&2
+    echo "    Remove any review-pr-$PR_NUMBER worktree or branch it left: $RM_CMD" >&2
+    echo "    (if that stops on a clone with no local main or master: $RM_FALLBACK)" >&2
+    echo "    Then: an earlier run's leftover, re-run Phase 2; a closed, merged or fork PR, which the helper cannot check out, use the inline fence below, which checks out the pinned head." >&2
     exit 1
 fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
@@ -267,7 +273,7 @@ LOCAL_REVIEW_BRANCH="review-pr-$PR_NUMBER"
 if [ ! -d "$WORKTREE_DIR" ]; then
     # Check out the pinned head commit, not the mutable origin/$HEAD_BRANCH.
     git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA" || {
-        echo "❌ Could not create $WORKTREE_DIR. If branch $LOCAL_REVIEW_BRANCH exists from an earlier attempt: a_g_worktree_remove --force $LOCAL_REVIEW_BRANCH, then re-run this fence." >&2
+        echo "❌ Could not create $WORKTREE_DIR. If branch $LOCAL_REVIEW_BRANCH exists from an earlier attempt, delete it and re-run this fence: git -C \"$REPO_DIR\" branch -D $LOCAL_REVIEW_BRANCH" >&2
         exit 1
     }
 fi
