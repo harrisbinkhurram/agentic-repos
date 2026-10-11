@@ -249,7 +249,7 @@ WORKTREE_DIR="$(pwd)"
 if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
     echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
     echo "    If a review-pr-$PR_NUMBER worktree or branch exists from an earlier run: a_g_worktree_remove --force review-pr-$PR_NUMBER, then re-run Phase 2." >&2
-    echo "    Otherwise (a closed, merged or fork PR, which the helper cannot check out): use the inline fence below, which checks out the pinned head." >&2
+    echo "    For a closed, merged or fork PR, which the helper cannot check out: remove whatever it left (same command), then use the inline fence below, which checks out the pinned head." >&2
     exit 1
 fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
@@ -266,7 +266,10 @@ LOCAL_REVIEW_BRANCH="review-pr-$PR_NUMBER"
 # If already exists from prior session, reuse
 if [ ! -d "$WORKTREE_DIR" ]; then
     # Check out the pinned head commit, not the mutable origin/$HEAD_BRANCH.
-    git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA"
+    git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA" || {
+        echo "❌ Could not create $WORKTREE_DIR. If branch $LOCAL_REVIEW_BRANCH exists from an earlier attempt: a_g_worktree_remove --force $LOCAL_REVIEW_BRANCH, then re-run this fence." >&2
+        exit 1
+    }
 fi
 cd "$WORKTREE_DIR" || exit 1
 if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
