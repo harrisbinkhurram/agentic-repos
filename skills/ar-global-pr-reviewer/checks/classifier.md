@@ -22,7 +22,7 @@ For each potential issue you've identified, before drafting a comment:
      "origin/$BASE_BRANCH...HEAD"
    ```
 
-   - If the diff added or modified those exact lines: **PR-INTRODUCED**. Done.
+   - If the diff added or modified those exact lines: **PR-INTRODUCED**. Go to step 4.
    - If no hit (the symbol existed before, untouched by this PR): go to step 3.
 
 3. **Does the same pattern appear in unchanged sibling files?**
@@ -39,15 +39,21 @@ For each potential issue you've identified, before drafting a comment:
    ```
 
    - If matches appear in unchanged code: **PRE-EXISTING**. The PR didn't cause this; it's a pre-existing condition.
-   - If no matches in unchanged code, AND step 2 didn't tag PR-INTRODUCED: check whether the PR added a new caller/path that now reaches the buggy code (a new `controller` method that calls an existing `service` method, etc.). If yes: **PR-EXPOSED**.
+   - If no matches in unchanged code, AND step 2 didn't tag PR-INTRODUCED: check whether the PR added a new caller/path that now reaches the buggy code (a new `controller` method that calls an existing `service` method, etc.). If yes: **PR-EXPOSED**, go to step 4.
+   - A PRE-EXISTING finding skips step 4: its comment already lists the locations.
 
-4. **Sweep the PR for every instance of the same shape.** Name the finding's shape as the installed code-review rule defines a class ("X is missing from list Y", "the number in A disagrees with the number in B", "case Z is not handled", "the same function or block"), then search the PR's changed files and the code paths they call for every other instance of it: the sibling branch of the same guard, the parallel copy of the same logic, the same claim restated in another file.
+4. **Sweep the PR for every instance of the same shape** (PR-INTRODUCED and PR-EXPOSED findings). Name the finding's shape as the installed code-review rule defines a class ("X is missing from list Y", "the number in A disagrees with the number in B", "case Z is not handled", "the same function or block"), then search the PR's changed files and the code paths they call for every other instance of it: the sibling branch of the same guard, the parallel copy of the same logic, the same claim restated in another file.
 
    ```bash
+   # Re-derive: step 3 is skipped on the PR-INTRODUCED path, and an empty list would grep the whole repo.
+   touched=$(git -C "$WORKTREE_DIR" diff --name-only "origin/$BASE_BRANCH...HEAD")
+   [ -n "$touched" ] || { echo "No changed files resolved; sweep not run." >&2; exit 1; }
    git -C "$WORKTREE_DIR" grep -n "<pattern>" -- $touched
    ```
 
    A grep finds the literal copies; read the callers and parallel paths of the changed code for the rest. Every in-PR instance joins the ONE comment for this finding ("same defect at A, B, C"), anchored on the first, so the fixer closes the shape in one pass instead of one round per instance. Instances outside the PR keep step 3's PRE-EXISTING treatment and go to Notes.
+
+   Three or more in-PR instances of one shape are a class, not a list: per the installed code-review rule's class definition, report them as ONE Approach comment that names the shape, lists the instances, and asks for one structural fix.
 
 5. **Record classification** alongside the finding before drafting any comment text. Comments without classification are rejected from the draft.
 

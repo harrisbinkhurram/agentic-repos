@@ -16,11 +16,15 @@ search per finding for other instances of its shape.
   changed files and fixes every in-PR instance in the same commit. Phase 4 splits commit from push
   and adds "Review the fix delta": `a_sag_code_reviewer` reviews `{fix_base}..HEAD` before push.
   Bug / Security / Missing findings get one repair commit; anything still flagged or needing a
-  decision is surfaced, not looped. The check posts nothing and writes no round marker, so it does
-  not count against the round budget.
+  decision is surfaced, not looped: a "Fix-delta review" block in the Phase 4 output and every
+  Phase 6 ending, approval before the push when interactive, and a `Needs human review` reply on
+  the affected finding. The check posts nothing and writes no round marker, so it does not count
+  against the round budget. Phase 3 gains an "Outside this PR" section. Phase 5 reverts the whole
+  round (`{fix_base}..HEAD`), since a round can now hold a repair commit.
 - `skills/ar-global-pr-reviewer/checks/classifier.md`: new step 4, sibling sweep. Name the shape,
   search the PR's changed files and the paths they call, report all in-PR instances in one comment.
-  Instances outside the PR keep the PRE-EXISTING downgrade.
+  It runs for PR-INTRODUCED and PR-EXPOSED findings. Three or more in-PR instances become one
+  Approach comment. Instances outside the PR keep the PRE-EXISTING downgrade.
 - `skills/ar-global-pr-reviewer/SKILL.md`: Phase 6.5 summary and the Phase 7 reviewer prompt carry
   the sweep; the comment format gains a "Same defect at:" line.
 

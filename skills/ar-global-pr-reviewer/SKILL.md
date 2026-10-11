@@ -693,6 +693,8 @@ SIBLING SWEEP (mandatory per Phase 6.5, see checks/classifier.md step 4):
     logic, the same claim restated in another file.
   - Report every in-PR instance in ONE comment, anchored on the first, listed
     under "Same defect at:", so the fixer closes the shape in one pass.
+  - Three or more in-PR instances of one shape become ONE Approach comment
+    (dedup step 3) that lists them and asks for one structural fix.
 
 AUTHOR INTENT (mandatory per Phase 6.6, see checks/author-intent.md):
   - Grep PR body, commit messages, referenced tickets for evidence the author
@@ -711,7 +713,7 @@ DEDUP + CROSS-REFERENCE, for each potential comment, before drafting it:
   2. If a substantively similar comment is already posted (same file, same area,
      same root cause), DO NOT add a duplicate. Note in your private log
      "skipped: dup of #COMMENT_ID".
-  3. If an existing comment is the same CLASS as your finding (same shape over the
+  3. Across reviews: if an existing comment is the same CLASS as your finding (same shape over the
      same list, value or heuristic, in any file), do NOT add another instance.
      A class is a shape across files, not a file. Two or more findings of one class
      become ONE Approach comment that names the class and the alternative; if the PR

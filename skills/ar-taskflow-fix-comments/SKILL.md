@@ -399,7 +399,7 @@ Then record the class in the Phase 3 report under **Approach problems**, which i
 
 The third finding is often correct, and that is not what this rule tests. It tests whether fixing one more instance changes the outcome. Where the answer is no, the reply above is the useful one and another fix is not.
 
-**Several instances in one round are one class too.** When a single review delivers three or more findings of one shape, do not fix them one by one. Either make ONE structural fix (the list becomes a pattern, the restated number becomes a reference to its source, the special cases become a rule) and reply `Fixed in {sha} (structural: {what}; covers #{ids})` on the first with `Same class as #{first_id}` on the rest, or use the `Not fixing as an instance` reply on the first and `Same class as #{first_id}` on the rest. Nineteen findings of one shape answered with nineteen fixes is the failure this whole section exists to stop.
+**Several instances in one round are one class too.** When a single review delivers three or more findings of one shape, or one finding lists three or more instances (a reviewer's "Same defect at:"), or the Phase 2 sweep finds three or more, do not fix them one by one. Either make ONE structural fix (the list becomes a pattern, the restated number becomes a reference to its source, the special cases become a rule) and reply `Fixed in {sha} (structural: {what}; covers #{ids})` on the first with `Same class as #{first_id}` on the rest, or use the `Not fixing as an instance` reply on the first and `Same class as #{first_id}` on the rest. Nineteen findings of one shape answered with nineteen fixes is the failure this whole section exists to stop.
 
 ### Review Staleness (check before trusting any bot verdict)
 
@@ -606,10 +606,13 @@ Processing in priority order...
 
 **Classify every real defect before fixing it**, per `<standards_location>/failure-classification.md`: make the non-code repairs its class requires first (requirement, assumption, or check), then fix the code, and record it where that rule says. Style and readability findings are not classified. If the file is missing, the project predates framework v1.3.0: fix as below and say once in the Phase 3 report that `ar-upgrade` adds it.
 
-**Sweep the shape before committing any fix.** A finding names one instance; the PR may hold more. Name the finding's shape (a class, per Phase 1 → Round Number and Same-Class Detection), then search the PR's changed files and the code paths they call for every other instance: the other branch of the same guard, the parallel copy of the same logic, the same claim restated in another file. Fix every in-PR instance in the same commit and name them in the reply (`Fixed in {sha}, also at {file:line, …}`). An instance outside the PR's changes is reported in the Phase 3 summary, not fixed here. This runs on the first finding of a shape; the class rules in Phase 1 still govern a shape that already has findings on the PR.
+**Sweep the shape before committing any fix.** A finding names one instance; the PR may hold more. Name the finding's shape (a class, per Phase 1 → Round Number and Same-Class Detection), then search the PR's changed files and the code paths they call for every other instance: the other branch of the same guard, the parallel copy of the same logic, the same claim restated in another file. Fix every in-PR instance in the same commit and name them in the reply (`Fixed in {sha}, also at {file:line, …}`). An instance outside the PR's changes is listed under **Outside this PR** in the Phase 3 report, not fixed here. This runs on the first finding of a shape; the class rules in Phase 1 still govern a shape that already has findings on the PR, and a sweep that finds three or more in-PR instances falls under Phase 1's several-instances rule (one structural fix, or one `Not fixing as an instance` reply).
 
 ```bash
-git diff --name-only "origin/$pr_base_branch...HEAD"   # the PR's changed files, the sweep's scope
+# Every Bash call is a fresh shell. `gh pr diff` needs no local base ref, so a stale or
+# unfetched base branch cannot widen the scope.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+gh pr diff "$pr_number" --name-only   # the PR's changed files, the sweep's scope
 ```
 
 ### Priority 1: SonarQube (highest confidence)
@@ -704,6 +707,11 @@ Round Number and Same-Class Detection:}
 source of truth for this value | a scope split}
 {If none:} none, no finding class has repeated on this PR
 
+### Outside this PR ({n})
+{For each instance the Phase 2 sweep found outside the PR's changed files:}
+{file}:{line}, same shape as {finding}
+{If none:} none
+
 ### Failure classes ({n})
 {For each classified defect:}
 {file}:{line}, {class}, revised: {artifact other than the code, or "code only"}
@@ -749,11 +757,14 @@ Skip this step only when `review.fix_delta_review` is `false` in `config_hints.j
 ```bash
 # Not `// true`: jq's alternative operator treats `false` as absent, so the opt-out would never fire.
 fix_delta_review=$(jq -r 'if .review.fix_delta_review == false then "false" else "true" end' .claude/config_hints.json 2>/dev/null)
-[ "$fix_delta_review" = false ] && echo "Fix-delta review skipped (review.fix_delta_review=false)."
-git diff {fix_base}..HEAD    # the delta under review: every line this round wrote, tests and docs included
+if [ "$fix_delta_review" = false ]; then
+  echo "Fix-delta review skipped (review.fix_delta_review=false)."   # print the block below, then go to the push
+else
+  git diff {fix_base}..HEAD    # the delta under review: every line this round wrote, tests and docs included
+fi
 ```
 
-**INVOKE AGENT: a_sag_code_reviewer (fresh context, foreground)** via the Task tool (subagent_type: `a_sag_code_reviewer`). Give it only the delta above, the findings this round answered, and `<standards_location>/`, and ask it two things:
+**INVOKE AGENT: a_sag_code_reviewer (fresh context, foreground)** via the Task tool (subagent_type: `a_sag_code_reviewer`). Give it the delta above, the findings this round answered, `<standards_location>/`, and the PR's changed-file list (`gh pr diff "$pr_number" --name-only`). It reviews the delta, and may read the listed files in full only to answer question 2. Ask it two things:
 
 1. Does the delta introduce a defect of its own: a new test that leaks state or exercises the wrong path, a doc that names the wrong thing, a guard that misses a case, an edit that breaks its callers?
 2. Does the shape of each answered finding still occur elsewhere in the PR's changed files (the Phase 2 sweep, checked by a second reader)?
@@ -762,10 +773,25 @@ Then:
 
 | Result | Action |
 |--------|--------|
-| No Bug / Security / Missing finding | Push |
-| Bug / Security / Missing finding the delta caused | Fix it in ONE further commit, then re-review only that commit. Push whatever the second review says |
-| Still flagged after the repair, or the finding needs a decision (scope, approach, intent) | Do not loop. Push the fixes that passed, and list the finding under **Fix-delta review** in the Phase 4 output and the replies preview, for the user to decide |
+| No Bug / Security / Missing finding | Go to the push |
+| Bug / Security / Missing finding | Fix it in ONE repair commit, then re-review only that commit. No second repair |
+| Still flagged after the repair, or the finding needs a decision (scope, approach, intent) | Do not loop. Record it as **surfaced** (below) |
 | Style or readability only | Fix it if trivial, otherwise drop it |
+
+Print this block in the Phase 4 output, even when the step was skipped or found nothing:
+
+```
+### Fix-delta review
+{ran | skipped (review.fix_delta_review=false)}, repair commit {sha | none},
+surfaced: {each finding with file:line and the answered comment it affects | none}
+```
+
+**Before the push:**
+
+- **Interactive:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or reverts the round with `git revert --no-edit {fix_base}..HEAD` and stops.
+- **Unattended:** push HEAD.
+
+Either way the push is the whole of HEAD: commits are never amended or dropped. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply with `commit=none` instead of `Fixed in`, and its thread stays open. Every Phase 6 ending quotes the block whenever it surfaced anything.
 
 This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every reply in this round cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
 
@@ -901,7 +927,7 @@ the widest scope any of them earned, and run that once.
 
 **The base is `{fix_base}`, the sha the branch was at before this round's first fix commit.** Phase 4 captures and records it; substitute the recorded value literally here, the same way `{pr_number}` and `{comment_id}` are substituted. It is **not** a shell variable at this point: every Bash tool call starts a new shell, so `$fix_base` from Phase 4's block expands to empty and `git diff --name-only ""` aborts with `fatal: ambiguous argument ''`. That matters more here than for the other cross-block values in this skill, `pr_number` and `pr_head_branch` can be re-derived from the PR at any time, but a pre-commit sha cannot be recovered once the commit lands, and the obvious recovery from that git failure is `HEAD~1`, the one substitute the reason below rules out.
 
-Not `HEAD~1`: it is the round base only while the round makes exactly one commit, which is what Phase 4 does today. A pinned sha stays correct if a re-fix after a failed verification adds a second commit, the case where `HEAD~1` would silently drop the first fix out of scope, and a migration fixed one commit earlier would be verified as though it had never been touched.
+Not `HEAD~1`: a round can make more than one commit (the Phase 4 repair commit, a re-fix after a failed verification), and `HEAD~1` would then silently drop the first fix out of scope, and a migration fixed one commit earlier would be verified as though it had never been touched.
 
 ```bash
 git diff --name-only {fix_base}          # every path this round touched
@@ -950,7 +976,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
    - **Failures** → STOP. Show the failing tests with file:line. Then:
      - **Unattended** (prompts are suppressed, or this skill was invoked by another routine
        rather than by a person at the keyboard): attempt ONE re-fix commit and re-run. If tests
-       still fail, `git revert HEAD`, push the revert, and end this run with
+       still fail, `git revert --no-edit {fix_base}..HEAD`, push the revert, and end this run with
        `VERIFY FAILED: {tests}, fix reverted in {sha}; the finding(s) it answered are back open
        for a human.` Never leave a red head on the PR and never ask a question nobody is there
        to answer.
@@ -958,9 +984,9 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
        ```
        Integration tests failed after fixing PR feedback: {list}
        1. Fix the failing tests now (then re-run)
-       2. Revert the last commit and investigate
+       2. Revert this round's commits and investigate
        ```
-       Option 1: fix, commit, re-run. Option 2: `git revert HEAD` and stop. There is no
+       Option 1: fix, commit, re-run. Option 2: `git revert --no-edit {fix_base}..HEAD` and stop. There is no
        "skip tests" option: 5a's stated-scope judgement is the only way to discharge this
        phase, and it is made before the run, not after a red result.
 
@@ -970,7 +996,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
 
 Pushing fixes is what makes CI re-run and produce new SonarQube and CodeRabbit comments on the commit just pushed. **The run is therefore not complete after the final push, and this phase is not optional.** Advising the user to re-run later does not discharge it: a sentence like "worth a second pass once CI reports" is an admission that a re-review is pending, not a substitute for handling one.
 
-Re-run the **Review Staleness** check (Phase 1) against the new head and branch on its result. Exactly four endings are allowed:
+Re-run the **Review Staleness** check (Phase 1) against the new head and branch on its result. Whichever ending is reached, it quotes the Phase 4 **Fix-delta review** block when that block surfaced anything; a surfaced finding is never folded into a clean `Complete.`. Exactly four endings are allowed:
 
 0. **Round cap, checked before the staleness result is acted on.** Read `round_number` and `max_agent_rounds` from Phase 1. When `round_number` is at or above `max_agent_rounds` and the bot or reviewer is again `behind`, do NOT re-enter Phase 1. Stop with:
    ```
@@ -1034,13 +1060,13 @@ Run Phase 7 (feed durable learnings back to rules) whenever this run finishes in
 
 **Typical iteration flow:**
 ```
-Iteration 1: Fix SonarQube + CodeRabbit comments → commit → push → verified
+Iteration 1: Fix SonarQube + CodeRabbit comments → commit → delta review → push → verified
                                                                       ↓
                                                             CI re-runs on new push
                                                                       ↓
                                         staleness check: bot reviewed < head → NOT clean
                                                                       ↓
-Iteration 2: New SonarQube issues? New CodeRabbit comments? → fix → commit → push → verified
+Iteration 2: New SonarQube issues? New CodeRabbit comments? → fix → commit → delta review → push → verified
                                                                       ↓
 Iteration 3: bot review current + nothing outstanding → done
                           OR round cap reached, review still posting → ROUND CAP (human decides)
