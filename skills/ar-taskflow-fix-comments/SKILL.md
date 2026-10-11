@@ -764,7 +764,7 @@ else
 fi
 ```
 
-**INVOKE AGENT: a_sag_code_reviewer (fresh context, foreground)** via the Task tool (subagent_type: `a_sag_code_reviewer`). Give it the delta above, the findings this round answered, `<standards_location>/`, and the PR's changed-file list (`gh pr diff "$pr_number" --name-only`). It reviews the delta, and may read the listed files in full only to answer question 2. Ask it two things:
+**INVOKE AGENT: a_sag_code_reviewer (fresh context, foreground)** via the Task tool (subagent_type: `a_sag_code_reviewer`). Give it the delta above, the findings this round answered, `<standards_location>/`, and the PR's changed-file list (`gh pr diff "${pr_number:-$(gh pr view --json number -q .number)}" --name-only`). It reviews the delta, and may read the listed files in full only to answer question 2. Ask it two things:
 
 1. Does the delta introduce a defect of its own: a new test that leaks state or exercises the wrong path, a doc that names the wrong thing, a guard that misses a case, an edit that breaks its callers?
 2. Does the shape of each answered finding still occur elsewhere in the PR's changed files (the Phase 2 sweep, checked by a second reader)?
@@ -788,18 +788,22 @@ surfaced: {each finding with file:line and the answered comment it affects | non
 
 **Before the push:**
 
-- **Interactive:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or reverts the round with `git revert --no-edit {fix_base}..HEAD` and stops.
+- **Interactive:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or reverts the round with `git revert --no-commit {fix_base}..HEAD && git commit -m "Revert PR feedback round {round_number}"` and stops.
 - **Unattended:** push HEAD.
 
-Either way the push is the whole of HEAD: commits are never amended or dropped. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply with `commit=none` instead of `Fixed in`, and its thread stays open. Every Phase 6 ending quotes the block whenever it surfaced anything.
+Either way the push is the whole of HEAD: commits are never amended or dropped. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply instead of `Fixed in`, and its thread stays open. Its marker still names the round's pushed commit, so a round whose answered findings were all surfaced is counted like any other. Every Phase 6 ending quotes the block whenever it surfaced anything.
 
-This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every reply in this round cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
+This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every `Fixed` reply and every marker in this round cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
 
 ```bash
 # Explicit remote + refspec, not a bare `git push`. The Pre-Flight gate has already
 # asserted current_branch == pr_head_branch and that its upstream is origin/$pr_head_branch,
 # so this is belt-and-braces: it names the destination instead of inheriting whatever
 # upstream the local branch happens to carry.
+# Re-derive: the delta review and any approval wait put this push in a fresh shell, where an
+# unset pr_head_branch turns the refspec into `HEAD:`.
+pr_head_branch=${pr_head_branch:-$(gh pr view "${pr_number:-$(gh pr view --json number -q .number)}" --json headRefName -q .headRefName)}
+[ -n "$pr_head_branch" ] || { echo "Could not resolve the PR head branch; not pushing." >&2; exit 1; }
 git push origin "HEAD:$pr_head_branch"
 ```
 
@@ -811,7 +815,7 @@ git push origin "HEAD:$pr_head_branch"
 <!-- ar-fix round={round_number} commit={sha} -->
 ```
 
-`{sha}` is the fix commit for `Fixed` / `Fixed forward`, and `none` for every other disposition. Phase 1 counts fix rounds from these markers (a marker with a real commit is a fix round, `none` is not), the reviewer reads them too, and they are invisible in the rendered comment. Without them the round has to be parsed out of prose, which breaks on a backtick. The reviewer side of this exchange posts its own `<!-- ar-review round={n} -->` marker in the review body; the two markers are what let a fresh session compute the same round number.
+`{sha}` is the fix commit for `Fixed` / `Fixed forward`, the round's pushed commit for a `Needs human review` reply from the Phase 4 fix-delta review, and `none` for every other disposition. Phase 1 counts fix rounds from these markers (a marker with a real commit is a fix round, `none` is not), the reviewer reads them too, and they are invisible in the rendered comment. Without them the round has to be parsed out of prose, which breaks on a backtick. The reviewer side of this exchange posts its own `<!-- ar-review round={n} -->` marker in the review body; the two markers are what let a fresh session compute the same round number.
 
 Replies serve as **iteration markers**, they let the next run know which comments are already handled.
 
@@ -976,7 +980,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
    - **Failures** → STOP. Show the failing tests with file:line. Then:
      - **Unattended** (prompts are suppressed, or this skill was invoked by another routine
        rather than by a person at the keyboard): attempt ONE re-fix commit and re-run. If tests
-       still fail, `git revert --no-edit {fix_base}..HEAD`, push the revert, and end this run with
+       still fail, `git revert --no-commit {fix_base}..HEAD && git commit -m "Revert PR feedback round {round_number}"`, push the revert, and end this run with
        `VERIFY FAILED: {tests}, fix reverted in {sha}; the finding(s) it answered are back open
        for a human.` Never leave a red head on the PR and never ask a question nobody is there
        to answer.
@@ -986,7 +990,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
        1. Fix the failing tests now (then re-run)
        2. Revert this round's commits and investigate
        ```
-       Option 1: fix, commit, re-run. Option 2: `git revert --no-edit {fix_base}..HEAD` and stop. There is no
+       Option 1: fix, commit, re-run. Option 2: the same single revert commit, and stop. There is no
        "skip tests" option: 5a's stated-scope judgement is the only way to discharge this
        phase, and it is made before the run, not after a red result.
 

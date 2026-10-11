@@ -633,7 +633,7 @@ Quick summary:
 1. `git log -p -S<symbol>` over the change range → were the offending lines touched by THIS PR?
 2. `git grep <pattern>` in unchanged sibling files → does the same issue exist there too?
 3. PRE-EXISTING findings move to the draft's "Notes" section, NOT inline comments. Reframe as "this PR is a good moment to fix N other locations", never phrase as if the PR caused it.
-4. Name each finding's shape and sweep the PR's changed files and the paths they call for every other instance of it. All in-PR instances go in ONE comment ("same defect at A, B, C").
+4. Name each PR-INTRODUCED or PR-EXPOSED finding's shape and sweep the PR's changed files and the paths they call for every other instance of it. All in-PR instances go in ONE comment ("same defect at A, B, C").
 
 Findings without a classification are rejected from the draft. This is the #1 source of low-confidence noise in v1, silently flagging pre-existing issues as if the PR introduced them.
 
@@ -687,7 +687,7 @@ CLASSIFICATION (mandatory per Phase 6.5, see checks/classifier.md):
     if the PR caused them.
 
 SIBLING SWEEP (mandatory per Phase 6.5, see checks/classifier.md step 4):
-  - For every finding, name its shape (a class per the code-review rule) and
+  - For every PR-INTRODUCED or PR-EXPOSED finding, name its shape (a class per the code-review rule) and
     search the PR's changed files and the code paths they call for every other
     instance: the other branch of the same guard, the parallel copy of the same
     logic, the same claim restated in another file.
