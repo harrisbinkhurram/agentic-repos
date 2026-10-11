@@ -28,7 +28,12 @@ search per finding for other instances of its shape.
   It runs for PR-INTRODUCED and PR-EXPOSED findings. Three or more in-PR instances become one
   Approach comment. Instances outside the PR keep the PRE-EXISTING downgrade.
 - `skills/ar-global-pr-reviewer/SKILL.md`: Phase 6.5 summary and the Phase 7 reviewer prompt carry
-  the sweep; the comment format gains a "Same defect at:" line.
+  the sweep; the comment format gains a "Same defect at:" line. New "Run state": Phase 0 writes the
+  run's values to `~/ar-global-pr-reviewer/state/<owner>-<repo>-<pr>.env` and every later fence,
+  including those in `checks/classifier.md` and `checks/author-intent.md`, loads it, since each
+  Bash call is a fresh shell. Loading it after Phase 2 enters the review worktree. Fences stop with
+  `exit` instead of a top-level `return`, and PR metadata is piped with `printf '%s\n'` instead of
+  `echo`, which rewrites backslash escapes in zsh.
 
 ## v1.3.1, 2026-10-11
 

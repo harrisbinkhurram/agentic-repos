@@ -9,7 +9,9 @@ For each surviving finding (post-classifier in `classifier.md`):
 1. **Read the PR body** for any mention of the topic, the symbol, or the design choice:
 
    ```bash
-   echo "$PR_META" | jq -r '.body'
+   AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+   . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
+   printf '%s\n' "$PR_META" | jq -r '.body'
    ```
 
    Look for phrases like "skipped X because Y", "intentional, Z", "follow-up in PROJ-XXX", "see ticket comment".
@@ -17,6 +19,8 @@ For each surviving finding (post-classifier in `classifier.md`):
 2. **Read commit messages on the branch**:
 
    ```bash
+   AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+   . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
    git -C "$WORKTREE_DIR" log "origin/$BASE_BRANCH..HEAD" --format='%B'
    ```
 
@@ -25,6 +29,10 @@ For each surviving finding (post-classifier in `classifier.md`):
 3. **Look for referenced tickets**, grep PR body + commits for ticket-key patterns:
 
    ```bash
+   AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+   . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
+   PR_BODY=$(printf '%s\n' "$PR_META" | jq -r '.body // ""')
+   COMMIT_MESSAGES=$(git -C "$WORKTREE_DIR" log "origin/$BASE_BRANCH..HEAD" --format='%B')
    grep -oE '[A-Z]{2,}-[0-9]+' <<< "$PR_BODY $COMMIT_MESSAGES" | sort -u
    ```
 

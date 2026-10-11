@@ -10,16 +10,18 @@ Mandatory step before a finding is added to the draft. Silently flagging pre-exi
 
 ## Procedure
 
-For each potential issue you've identified, before drafting a comment. `{WORKTREE_DIR}` and `{BASE_BRANCH}` below are placeholders: substitute the review worktree path and base branch recorded in Phases 0-2 literally, since each Bash call is a fresh shell where those variables are unset.
+For each potential issue you've identified, before drafting a comment. Every fence below starts by loading the run state (`SKILL.md` → Phase 0, Run state), which sets `WORKTREE_DIR` and `BASE_BRANCH`; the two lines are shown once, in step 2.
 
 1. **Name the relevant symbol**, the function, variable, pattern, or filename the issue centers on. Be specific. "The validation logic" is not specific enough; `OrderItemValidator.validateItem` is.
 
 2. **Did THIS PR introduce or modify the offending lines?**
 
    ```bash
-   git -C "{WORKTREE_DIR}" log -p --first-parent \
+   AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+   . "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
+   git -C "$WORKTREE_DIR" log -p --first-parent \
      -S "<symbol>" \
-     "origin/{BASE_BRANCH}...HEAD"
+     "origin/$BASE_BRANCH...HEAD"
    ```
 
    - If the diff added or modified those exact lines: **PR-INTRODUCED**. Go to step 4.
@@ -29,12 +31,12 @@ For each potential issue you've identified, before drafting a comment. `{WORKTRE
 
    List the files the PR touched:
    ```bash
-   touched=$(git -C "{WORKTREE_DIR}" diff --name-only "origin/{BASE_BRANCH}...HEAD")
+   touched=$(git -C "$WORKTREE_DIR" diff --name-only "origin/$BASE_BRANCH...HEAD")
    ```
 
    Grep for the pattern in everything EXCEPT those files:
    ```bash
-   git -C "{WORKTREE_DIR}" grep -n "<pattern>" -- \
+   git -C "$WORKTREE_DIR" grep -n "<pattern>" -- \
      $(printf ':!%s ' $touched)
    ```
 
@@ -46,9 +48,9 @@ For each potential issue you've identified, before drafting a comment. `{WORKTRE
 
    ```bash
    # Recomputed here: step 3 is skipped on the PR-INTRODUCED path, and an empty list would grep the whole repo.
-   touched=$(git -C "{WORKTREE_DIR}" diff --name-only "origin/{BASE_BRANCH}...HEAD")
+   touched=$(git -C "$WORKTREE_DIR" diff --name-only "origin/$BASE_BRANCH...HEAD")
    [ -n "$touched" ] || { echo "No changed files resolved; sweep not run." >&2; exit 1; }
-   git -C "{WORKTREE_DIR}" grep -n "<pattern>" -- $touched
+   git -C "$WORKTREE_DIR" grep -n "<pattern>" -- $touched
    ```
 
    A grep finds the literal copies; read the callers and parallel paths of the changed code for the rest. Every in-PR instance joins the ONE comment for this finding ("same defect at A, B, C"), anchored on the first, so the fixer closes the shape in one pass instead of one round per instance. Instances outside the PR keep step 3's PRE-EXISTING treatment and go to Notes.
