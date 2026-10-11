@@ -538,6 +538,12 @@ Skip this source entirely when `bot_state` is `none` or `skipped`, there are no 
 ```bash
 # Pipe to a real jq: `gh api --jq` takes the expression only and does not accept --arg,
 # and $bot_login is configurable (see Review Staleness above).
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
+bot_login=${bot_login-$(jq -r '.review.bot_login // "coderabbitai[bot]"' .claude/config_hints.json 2>/dev/null)}
+[ "$bot_login" = "null" ] && bot_login=""
 gh api repos/$repo_owner/$repo_name/pulls/$pr_number/comments --paginate \
   | jq -s --arg b "$bot_login" 'add // [] | [.[] | select(.user.login == $b) | {
     id: .id,
@@ -562,6 +568,10 @@ Parse each comment body to extract:
 ### Source C: Human Reviewer Comments
 
 ```bash
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
 # Inline review comments (excluding bots)
 gh api repos/$repo_owner/$repo_name/pulls/$pr_number/comments \
   --jq '[.[] | select(.user.login != "coderabbitai[bot]" and .user.type != "Bot") | {
@@ -829,6 +839,10 @@ Replies serve as **iteration markers**, they let the next run know which comment
 | Any source, on a **MERGED / CLOSED** PR | Reply: "Fixed forward in #{followup_pr} ({commit_sha}), {brief description}". **Do not use the plain "Fixed in {sha}" form**: on a merged PR it reads as fixed *in that PR*, which is false, the commit is on a different branch. Name the follow-up PR so the fix is findable. If the follow-up is not open yet, state where it is going ("Fixing forward in a follow-up PR into `{base_branch}`") rather than implying this PR carries the fix |
 
 ```bash
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
 # Reply to a PR comment
 gh api repos/$repo_owner/$repo_name/pulls/$pr_number/comments/{comment_id}/replies \
   -f body="{reply_text}"
@@ -888,6 +902,10 @@ Pushing fixes does not tell anyone the PR is ready to look at again. GitHub only
 Bots, the PR author and the account running this skill are always left out: GitHub refuses a review request to the author, and bots re-review on push by themselves.
 
 ```bash
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
 pr_author=$(gh pr view "$pr_number" --json author -q .author.login)
 me=$(gh api user -q .login)
 prev_reviewers=$(gh api "repos/$repo_owner/$repo_name/pulls/$pr_number/reviews" --paginate \
@@ -1015,6 +1033,13 @@ Re-run the **Review Staleness** check (Phase 1) against the new head and branch 
 
 1. **`bot_state=behind`, round cap not reached, wait budget remaining → wait for the bot re-review, BOUNDED, then re-enter Phase 1** and iterate on whatever it raised. The Phase 1 iteration awareness skips comments already handled. The wait is one Bash call with a 600s tool timeout that polls once a minute for up to `review.bot_wait_minutes` (default 10):
    ```bash
+   # Fresh shell: re-derive the inputs, as Phase 1 does.
+   pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+   repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+   repo_name=${repo_name:-$(gh repo view --json name -q .name)}
+   bot_login=${bot_login-$(jq -r '.review.bot_login // "coderabbitai[bot]"' .claude/config_hints.json 2>/dev/null)}
+   [ "$bot_login" = "null" ] && bot_login=""
+   head_oid=$(gh pr view "$pr_number" --json headRefOid -q .headRefOid)   # always re-read: the push moved the head
    bot_wait=$(jq -r '.review.bot_wait_minutes // 10' .claude/config_hints.json 2>/dev/null)
    case "$bot_wait" in ''|*[!0-9]*) bot_wait=10 ;; esac
    [ "$bot_wait" -gt 10 ] && bot_wait=10   # one tool call; a longer wait belongs to the caller
