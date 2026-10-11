@@ -33,7 +33,8 @@ search per finding for other instances of its shape.
   including those in `checks/classifier.md` and `checks/author-intent.md`, loads it, since each
   Bash call is a fresh shell. Loading it after Phase 2 enters the review worktree. Fences stop with
   `exit` instead of a top-level `return`, and PR metadata is piped with `printf '%s\n'` instead of
-  `echo`, which rewrites backslash escapes in zsh.
+  `echo`, which rewrites backslash escapes in zsh. Lists of files and reviewer logins are read line
+  by line into arguments, since zsh does not word-split an unquoted variable.
 
 ## v1.3.1, 2026-10-11
 

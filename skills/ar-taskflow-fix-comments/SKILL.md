@@ -918,14 +918,16 @@ if [ -z "$prev_reviewers" ]; then
   fi
 fi
 [ -z "$prev_reviewers" ] && echo "No reviewer to re-request (none reviewed, no usable review.default_reviewer)."
-for r in $prev_reviewers; do
+# One login per line; read them one by one, since zsh does not word-split an unquoted $prev_reviewers.
+while IFS= read -r r; do
+  [ -n "$r" ] || continue
   if gh api -X POST "repos/$repo_owner/$repo_name/pulls/$pr_number/requested_reviewers" \
        -f "reviewers[]=$r" >/dev/null; then
     echo "Re-requested review from @$r"
   else
     echo "Could not re-request review from @$r"
   fi
-done
+done < <(printf '%s\n' "$prev_reviewers")
 ```
 
 Report the result in the Phase 4 output. A failed request is reported, never retried through another account.

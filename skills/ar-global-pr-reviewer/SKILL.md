@@ -248,7 +248,8 @@ INPUT="$PR_NUMBER" source "$WT_DIR/a_g_worktree_review" "$PR_NUMBER"
 WORKTREE_DIR="$(pwd)"
 if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
     echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
-    echo "    A stale one from an earlier run: a_g_worktree_remove --force review-pr-$PR_NUMBER, then re-run Phase 2." >&2
+    echo "    If a review-pr-$PR_NUMBER worktree or branch exists from an earlier run: a_g_worktree_remove --force review-pr-$PR_NUMBER, then re-run Phase 2." >&2
+    echo "    Otherwise (a closed, merged or fork PR, which the helper cannot check out): use the inline fence below, which checks out the pinned head." >&2
     exit 1
 fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
@@ -723,7 +724,7 @@ Skip this check for high-confidence + high-impact findings (NPE, security, data 
 
 This is where the model does the actual reading and reasoning. Invoke the `a_sag_code_reviewer` agent if available; otherwise reason inline.
 
-**Prompt for the reviewer (you, the model, OR a subagent):** the `{…}` values are filled in before the prompt is used, from the run state (`cat "$AR_STATE"` after loading it) and from the SKIP section of `{REVIEW_DIR}/project-rules-summary.md`. A subagent receives the filled-in text; it has no access to the state.
+**Prompt for the reviewer (you, the model, OR a subagent):** the `{…}` values are filled in before the prompt is used, from the run state (`cat "$AR_STATE"` after loading it) and from the SKIP section of `{REVIEW_DIR}/project-rules-summary.md`. Phase 5 is usually still running at this point; with no `TEST_VERDICT` in the state yet, fill it with `pending (tests still running; Phase 8 adds the result)`. A subagent receives the filled-in text; it has no access to the state.
 
 ```
 You are reviewing PR #{PR_NUMBER} on {OWNER}/{REPO}: "{PR_TITLE}".
