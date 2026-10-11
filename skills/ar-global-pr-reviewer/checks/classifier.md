@@ -41,7 +41,15 @@ For each potential issue you've identified, before drafting a comment:
    - If matches appear in unchanged code: **PRE-EXISTING**. The PR didn't cause this; it's a pre-existing condition.
    - If no matches in unchanged code, AND step 2 didn't tag PR-INTRODUCED: check whether the PR added a new caller/path that now reaches the buggy code (a new `controller` method that calls an existing `service` method, etc.). If yes: **PR-EXPOSED**.
 
-4. **Record classification** alongside the finding before drafting any comment text. Comments without classification are rejected from the draft.
+4. **Sweep the PR for every instance of the same shape.** Name the finding's shape as the installed code-review rule defines a class ("X is missing from list Y", "the number in A disagrees with the number in B", "case Z is not handled", "the same function or block"), then search the PR's changed files and the code paths they call for every other instance of it: the sibling branch of the same guard, the parallel copy of the same logic, the same claim restated in another file.
+
+   ```bash
+   git -C "$WORKTREE_DIR" grep -n "<pattern>" -- $touched
+   ```
+
+   A grep finds the literal copies; read the callers and parallel paths of the changed code for the rest. Every in-PR instance joins the ONE comment for this finding ("same defect at A, B, C"), anchored on the first, so the fixer closes the shape in one pass instead of one round per instance. Instances outside the PR keep step 3's PRE-EXISTING treatment and go to Notes.
+
+5. **Record classification** alongside the finding before drafting any comment text. Comments without classification are rejected from the draft.
 
 ## How classification affects the comment
 

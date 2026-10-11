@@ -606,6 +606,12 @@ Processing in priority order...
 
 **Classify every real defect before fixing it**, per `<standards_location>/failure-classification.md`: make the non-code repairs its class requires first (requirement, assumption, or check), then fix the code, and record it where that rule says. Style and readability findings are not classified. If the file is missing, the project predates framework v1.3.0: fix as below and say once in the Phase 3 report that `ar-upgrade` adds it.
 
+**Sweep the shape before committing any fix.** A finding names one instance; the PR may hold more. Name the finding's shape (a class, per Phase 1 → Round Number and Same-Class Detection), then search the PR's changed files and the code paths they call for every other instance: the other branch of the same guard, the parallel copy of the same logic, the same claim restated in another file. Fix every in-PR instance in the same commit and name them in the reply (`Fixed in {sha}, also at {file:line, …}`). An instance outside the PR's changes is reported in the Phase 3 summary, not fixed here. This runs on the first finding of a shape; the class rules in Phase 1 still govern a shape that already has findings on the PR.
+
+```bash
+git diff --name-only "origin/$pr_base_branch...HEAD"   # the PR's changed files, the sweep's scope
+```
+
 ### Priority 1: SonarQube (highest confidence)
 
 SonarQube issues have precise rule IDs and locations. Fix strategy by category:
@@ -730,16 +736,46 @@ git rev-parse HEAD    # -> {fix_base}; state this sha in the Phase 4 output, 5a 
 
 git add {fixed_files}
 git commit -m "[{namespace}-XXX] Fix PR feedback (iteration {n}): {n} SonarQube, {n} CodeRabbit, {n} reviewer issues"
+```
+
+Stage only the files you actually fixed, never `git add -A` / `git add .`. The Pre-Flight clean-tree gate makes a blanket add *look* safe, but it would also pick up anything the fix run itself produced as a side effect (build output, generated reports).
+
+Follow the Post-Review Fix Commits rule from the ar-taskflow skill: no force push, no amend.
+
+### Review the fix delta (before push)
+
+Skip this step only when `review.fix_delta_review` is `false` in `config_hints.json` (default `true`), and say so in the Phase 4 output.
+
+```bash
+# Not `// true`: jq's alternative operator treats `false` as absent, so the opt-out would never fire.
+fix_delta_review=$(jq -r 'if .review.fix_delta_review == false then "false" else "true" end' .claude/config_hints.json 2>/dev/null)
+[ "$fix_delta_review" = false ] && echo "Fix-delta review skipped (review.fix_delta_review=false)."
+git diff {fix_base}..HEAD    # the delta under review: every line this round wrote, tests and docs included
+```
+
+**INVOKE AGENT: a_sag_code_reviewer (fresh context, foreground)** via the Task tool (subagent_type: `a_sag_code_reviewer`). Give it only the delta above, the findings this round answered, and `<standards_location>/`, and ask it two things:
+
+1. Does the delta introduce a defect of its own: a new test that leaks state or exercises the wrong path, a doc that names the wrong thing, a guard that misses a case, an edit that breaks its callers?
+2. Does the shape of each answered finding still occur elsewhere in the PR's changed files (the Phase 2 sweep, checked by a second reader)?
+
+Then:
+
+| Result | Action |
+|--------|--------|
+| No Bug / Security / Missing finding | Push |
+| Bug / Security / Missing finding the delta caused | Fix it in ONE further commit, then re-review only that commit. Push whatever the second review says |
+| Still flagged after the repair, or the finding needs a decision (scope, approach, intent) | Do not loop. Push the fixes that passed, and list the finding under **Fix-delta review** in the Phase 4 output and the replies preview, for the user to decide |
+| Style or readability only | Fix it if trivial, otherwise drop it |
+
+This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every reply in this round cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
+
+```bash
 # Explicit remote + refspec, not a bare `git push`. The Pre-Flight gate has already
 # asserted current_branch == pr_head_branch and that its upstream is origin/$pr_head_branch,
 # so this is belt-and-braces: it names the destination instead of inheriting whatever
 # upstream the local branch happens to carry.
 git push origin "HEAD:$pr_head_branch"
 ```
-
-Stage only the files you actually fixed, never `git add -A` / `git add .`. The Pre-Flight clean-tree gate makes a blanket add *look* safe, but it would also pick up anything the fix run itself produced as a side effect (build output, generated reports).
-
-Follow the Post-Review Fix Commits rule from the ar-taskflow skill: no force push, no amend.
 
 ### Reply on PR
 
@@ -1055,6 +1091,7 @@ ar-taskflow (Phase 0-4) → commit → push → create PR
 - `"${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/scripts/ar-sonarqube/fetch-issues.sh"`, for SonarQube (optional, installed globally by framework)
 - `SONARQUBE_URL` + `SONARQUBE_TOKEN`, for SonarQube (optional, skip if not set)
 - `jq`, for the PR snapshot parsing, the round-marker count, and the review-staleness states
+- `a_sag_code_reviewer` (agentic-devkit), for the Phase 4 fix-delta review (off with `review.fix_delta_review: false`)
 - The project's configured verify command, for Phase 5 verification (discharged, with the reason stated, when it compiles, executes, lints, or validates none of the changed files; owned by a pre-push hook where one runs it)
 
 ## Notes
