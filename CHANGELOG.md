@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.4.0, 2026-10-11
+
+**Summary:** PR review converges in fewer rounds. The fixer reviews its own fix diff before pushing,
+and both reviewer and fixer sweep a finding's shape across the whole PR, so a class is closed in
+one pass instead of one sibling per round.
+
+**Cost note:** `ar-taskflow-fix-comments` adds one fresh-context `a_sag_code_reviewer` run per fix
+round, scoped to that round's diff, plus at most one repair commit and one re-review. On by
+default; `review.fix_delta_review: false` in `config_hints.json` turns it off. Both skills add a
+search per finding for other instances of its shape.
+
+**Changed:**
+- `skills/ar-taskflow-fix-comments/SKILL.md`: Phase 2 sweeps each finding's shape across the PR's
+  changed files and fixes every in-PR instance in the same commit. Phase 4 splits commit from push
+  and adds "Review the fix delta": `a_sag_code_reviewer` reviews `{fix_base}..HEAD` before push.
+  Bug / Security / Missing findings get one repair commit; anything still flagged or needing a
+  decision is surfaced, not looped: a "Fix-delta review" block in the Phase 4 output and every
+  Phase 6 ending, and a `Needs human review` reply on the affected finding. When interactive, a
+  round with a repair commit or a surfaced finding waits for approval before the push, and the
+  user may discard the unpushed round locally; any other round pushes without waiting. The check
+  posts nothing and writes no round marker, so it does not count against the round budget. Phase 3
+  gains an "Outside this PR" section. Phase 5 reverts the whole round (`{fix_base}..HEAD`), since a
+  round can now hold a repair commit. Every fence that calls the GitHub API or pushes re-derives
+  the PR number, repository and bot login itself, because each Bash call is a fresh shell.
+- `skills/ar-global-pr-reviewer/checks/classifier.md`: new step 4, sibling sweep. Name the shape,
+  search the PR's changed files and the paths they call, report all in-PR instances in one comment.
+  It runs for PR-INTRODUCED and PR-EXPOSED findings. Three or more in-PR instances become one
+  Approach comment. Instances outside the PR keep the PRE-EXISTING downgrade.
+- `skills/ar-global-pr-reviewer/SKILL.md`: Phase 6.5 summary and the Phase 7 reviewer prompt carry
+  the sweep; the comment format gains a "Same defect at:" line. New "Run state": Phase 0 writes the
+  run's values to `~/ar-global-pr-reviewer/state/<owner>-<repo>-<pr>.env` and every later fence,
+  including those in `checks/classifier.md` and `checks/author-intent.md`, loads it, since each
+  Bash call is a fresh shell. Loading it after Phase 2 enters the review worktree. Fences stop with
+  `exit` instead of a top-level `return`, and PR metadata is piped with `printf '%s\n'` instead of
+  `echo`, which rewrites backslash escapes in zsh. Changed files are read NUL-separated into
+  literal pathspecs, and reviewer logins line by line, since zsh does not word-split an unquoted
+  variable.
+
 ## v1.3.1, 2026-10-11
 
 **Summary:** `ar-taskflow` checks, after creating a worktree, that the machine's worktree root is

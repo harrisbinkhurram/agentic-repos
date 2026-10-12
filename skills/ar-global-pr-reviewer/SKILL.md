@@ -41,13 +41,24 @@ Parse the input. A bare number alone is ambiguous (no repo), ask for the URL or 
 
 Store as: `PR_URL`, `OWNER`, `REPO`, `PR_NUMBER`.
 
+**Run state.** Every Bash call is a fresh shell, so no variable survives from one fence to the next. The first fence below writes the run's values to a state file, and every later fence starts by loading it, with `{OWNER}`, `{REPO}` and `{PR_NUMBER}` substituted literally from the parse above:
+
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
+```
+
+A fence that sets a value a later fence reads appends it with `printf '%s=%q\n' NAME "$NAME" >> "$AR_STATE"`; a later line wins. Once Phase 2 records the worktree, loading the state also changes into it. Fences stop with `exit`, never a top-level `return`: a fresh shell is not sourced, so `return` prints an error and the fence carries on.
+
+```bash
+PR_URL="{PR_URL}"; OWNER="{OWNER}"; REPO="{REPO}"; PR_NUMBER="{PR_NUMBER}"
+
 # Validate gh is installed and authenticated
 if ! command -v gh >/dev/null 2>&1; then
     echo "❌ gh CLI not installed. brew install gh, then gh auth login."
-    return 1
+    exit 1
 fi
-gh auth status >/dev/null 2>&1 || { echo "❌ gh not authenticated. Run: gh auth login"; return 1; }
+gh auth status >/dev/null 2>&1 || { echo "❌ gh not authenticated. Run: gh auth login"; exit 1; }
 
 # Fetch PR metadata. Capture stderr so a wrong field name or missing scope
 # surfaces the actual `gh` error message, not a misleading "Check URL/auth".
@@ -61,15 +72,15 @@ if [ -z "$PR_META" ]; then
         echo "    Check the URL, run 'gh auth status', and confirm org access."
     fi
     rm -f "$PR_META_ERR"
-    return 1
+    exit 1
 fi
 rm -f "$PR_META_ERR"
 
-PR_NUMBER=$(echo "$PR_META" | jq -r '.number')
-PR_TITLE=$(echo "$PR_META" | jq -r '.title')
-PR_STATE=$(echo "$PR_META" | jq -r '.state')
-HEAD_BRANCH=$(echo "$PR_META" | jq -r '.headRefName')
-BASE_BRANCH=$(echo "$PR_META" | jq -r '.baseRefName')
+PR_NUMBER=$(printf '%s\n' "$PR_META" | jq -r '.number')
+PR_TITLE=$(printf '%s\n' "$PR_META" | jq -r '.title')
+PR_STATE=$(printf '%s\n' "$PR_META" | jq -r '.state')
+HEAD_BRANCH=$(printf '%s\n' "$PR_META" | jq -r '.headRefName')
+BASE_BRANCH=$(printf '%s\n' "$PR_META" | jq -r '.baseRefName')
 # Resolve the PR head via an IMMUTABLE reference, not origin/$HEAD_BRANCH. The head
 # branch ref is mutable (it can move under us mid-review) and, for fork PRs, may not
 # exist on origin at all, either way origin/$HEAD_BRANCH risks silently reviewing a
@@ -77,12 +88,20 @@ BASE_BRANCH=$(echo "$PR_META" | jq -r '.baseRefName')
 # is the PR's own head ref (works for forks too). That remote ref is NOT immutable,
 # GitHub moves it whenever the author pushes, so it is pinned LOCALLY after the fetch
 # below and every fetch is checked against HEAD_SHA. Use these everywhere below.
-HEAD_SHA=$(echo "$PR_META" | jq -r '.headRefOid // empty')
+HEAD_SHA=$(printf '%s\n' "$PR_META" | jq -r '.headRefOid // empty')
 PR_HEAD_REF="refs/pr/$PR_NUMBER/head"   # local ref, pinned to the PR head as of the fetch
-PR_AUTHOR=$(echo "$PR_META" | jq -r '.author.login')
-CHANGED_FILES=$(echo "$PR_META" | jq -r '.changedFiles')
-ADDITIONS=$(echo "$PR_META" | jq -r '.additions')
-DELETIONS=$(echo "$PR_META" | jq -r '.deletions')
+PR_AUTHOR=$(printf '%s\n' "$PR_META" | jq -r '.author.login')
+CHANGED_FILES=$(printf '%s\n' "$PR_META" | jq -r '.changedFiles')
+ADDITIONS=$(printf '%s\n' "$PR_META" | jq -r '.additions')
+DELETIONS=$(printf '%s\n' "$PR_META" | jq -r '.deletions')
+
+# Start this run's state fresh. Every later fence loads it.
+AR_STATE="$HOME/ar-global-pr-reviewer/state/$OWNER-$REPO-$PR_NUMBER.env"
+mkdir -p "$(dirname "$AR_STATE")"
+printf '%s=%q\n' PR_URL "$PR_URL" OWNER "$OWNER" REPO "$REPO" PR_NUMBER "$PR_NUMBER" \
+    PR_TITLE "$PR_TITLE" PR_STATE "$PR_STATE" PR_AUTHOR "$PR_AUTHOR" \
+    HEAD_BRANCH "$HEAD_BRANCH" BASE_BRANCH "$BASE_BRANCH" HEAD_SHA "$HEAD_SHA" \
+    PR_HEAD_REF "$PR_HEAD_REF" PR_META "$PR_META" > "$AR_STATE"
 ```
 
 **Sanity-check before continuing:**
@@ -104,6 +123,8 @@ If the PR is CLOSED or MERGED, also warn, reviewing closed PRs is valid (post-me
 **Self-review detection.** Compare the authenticated `gh` user to the PR author. If they match, the review is a self-review, set a flag that adjusts framing in Phase 7.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 GH_LOGIN=$(gh api user --jq .login 2>/dev/null)
 if [ "$GH_LOGIN" = "$PR_AUTHOR" ]; then
     SELF_REVIEW=true
@@ -120,6 +141,7 @@ if [ "$GH_LOGIN" = "$PR_AUTHOR" ]; then
 else
     SELF_REVIEW=false
 fi
+printf '%s=%q\n' SELF_REVIEW "$SELF_REVIEW" >> "$AR_STATE"
 ```
 
 Store `SELF_REVIEW` for Phase 7's prompt + Phase 8's draft-yield line.
@@ -129,6 +151,8 @@ Store `SELF_REVIEW` for Phase 7's prompt + Phase 8's draft-yield line.
 ## Phase 1: Clone or locate the repo
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 GLOBAL_ROOT="$HOME/ar-global-pr-reviewer"
 # Key by $OWNER/$REPO, not bare $REPO. Same repo name can exist under
 # different orgs (org-a/foo vs org-b/foo); without the owner segment the
@@ -166,7 +190,7 @@ assert_pinned() {
         return 1
     fi
 }
-assert_pinned || return 1
+assert_pinned || exit 1
 # Fall back to the fetched ref's tip if headRefOid was unavailable from the API.
 [ -z "$HEAD_SHA" ] && HEAD_SHA=$(git -C "$REPO_DIR" rev-parse "$PR_HEAD_REF")
 
@@ -176,7 +200,7 @@ if ! git -C "$REPO_DIR" merge-base "origin/$BASE_BRANCH" "$HEAD_SHA" >/dev/null 
     git -C "$REPO_DIR" fetch --deepen=500 origin "$BASE_BRANCH" --quiet
     git -C "$REPO_DIR" fetch --deepen=500 origin "refs/pull/$PR_NUMBER/head:$PR_HEAD_REF" --force --quiet
     # Second fetch, second opportunity for the ref to have moved.
-    assert_pinned || return 1
+    assert_pinned || exit 1
     # Re-test the thing we deepened FOR. Checking only whether the head moved leaves the
     # unresolved-merge-base case falling straight through, a branch older than the
     # 500-commit deepen, or a force-pushed base that dropped the fork point. Every later
@@ -188,9 +212,10 @@ if ! git -C "$REPO_DIR" merge-base "origin/$BASE_BRANCH" "$HEAD_SHA" >/dev/null 
         echo "    The fork point is outside the deepened history, or the base branch was force-pushed and dropped it." >&2
         echo "    Re-run with a full clone (remove ~/ar-global-pr-reviewer/repos/<owner>/<repo> and let it re-clone), or deepen further." >&2
         echo "    Aborting before any diff: an unresolved merge-base yields an empty diff, which reads as 'no changes'." >&2
-        return 1
+        exit 1
     fi
 fi
+printf '%s=%q\n' GLOBAL_ROOT "$GLOBAL_ROOT" REPO_DIR "$REPO_DIR" HEAD_SHA "$HEAD_SHA" >> "$AR_STATE"
 ```
 
 ---
@@ -200,6 +225,8 @@ fi
 Use the `a_g_worktree_review` helper from agentic-devkit. It already handles PR-number resolution, `review-pr-{N}` naming, dotfile copying, and auto-cd.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 cd "$REPO_DIR"
 
 # a_g_worktree_review comes from agentic-devkit. In an interactive shell it is
@@ -208,29 +235,53 @@ cd "$REPO_DIR"
 WT_DIR="${AGENTIC_DEVKIT_DIR:-$HOME/agentic-devkit}/scripts"
 if [ ! -f "$WT_DIR/a_g_worktree_review" ]; then
     echo "❌ a_g_worktree_review not found. Install agentic-devkit (run its install.sh)."
-    return 1
+    exit 1
 fi
 
 # Source it (the script uses `return` not `exit`, designed to be sourced)
 INPUT="$PR_NUMBER" source "$WT_DIR/a_g_worktree_review" "$PR_NUMBER"
 # That cd's us into the new review worktree at:
 #   /(dirname REPO_DIR)/WorkTrees/$REPO/review-pr-$PR_NUMBER/
-# Capture it:
+# Capture it, and make every later fence start there. The helper returns without a cd when
+# the worktree or its branch already exists, or when it cancels on a closed PR, so check that
+# this is a worktree other than the main clone and that it sits at the pinned head.
 WORKTREE_DIR="$(pwd)"
+if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+    # Plain git, runnable as printed: it clears a leftover worktree (even one whose directory is
+    # gone), a leftover branch with no worktree, or both.
+    WT_PATH="$GLOBAL_ROOT/repos/$OWNER/WorkTrees/$REPO/review-pr-$PR_NUMBER"
+    RM_CMD="git -C \"$REPO_DIR\" worktree remove --force \"$WT_PATH\"; git -C \"$REPO_DIR\" branch -D review-pr-$PR_NUMBER"
+    echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
+    echo "    Remove any review-pr-$PR_NUMBER worktree or branch it left: $RM_CMD" >&2
+    echo "    Then: an earlier run's leftover, re-run Phase 2; a closed, merged or fork PR, which the helper cannot check out, use the inline fence below, which checks out the pinned head." >&2
+    exit 1
+fi
+printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
 ```
 
 If you prefer to avoid sourcing in this context (e.g., the skill is being invoked headlessly), do the worktree creation inline:
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 WORKTREE_DIR="$GLOBAL_ROOT/repos/$OWNER/WorkTrees/$REPO/review-pr-$PR_NUMBER"
 mkdir -p "$(dirname "$WORKTREE_DIR")"
 LOCAL_REVIEW_BRANCH="review-pr-$PR_NUMBER"
 # If already exists from prior session, reuse
 if [ ! -d "$WORKTREE_DIR" ]; then
     # Check out the pinned head commit, not the mutable origin/$HEAD_BRANCH.
-    git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA"
+    git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA" || {
+        echo "❌ Could not create $WORKTREE_DIR. If branch $LOCAL_REVIEW_BRANCH exists from an earlier attempt, remove it and re-run this fence: git -C \"$REPO_DIR\" worktree remove --force \"$WORKTREE_DIR\"; git -C \"$REPO_DIR\" branch -D $LOCAL_REVIEW_BRANCH" >&2
+        exit 1
+    }
 fi
-cd "$WORKTREE_DIR"
+cd "$WORKTREE_DIR" || exit 1
+if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+    echo "❌ $WORKTREE_DIR is not at the PR head $HEAD_SHA (a stale worktree from an earlier run?)." >&2
+    echo "    Remove it and re-run this fence: git -C \"$REPO_DIR\" worktree remove --force \"$WORKTREE_DIR\"; git -C \"$REPO_DIR\" branch -D $LOCAL_REVIEW_BRANCH" >&2
+    exit 1
+fi
+printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
 ```
 
 ---
@@ -240,11 +291,14 @@ cd "$WORKTREE_DIR"
 This is the "intelligently follow the project's existing process" part of the skill. Scan multiple known config locations; combine findings into a single context summary.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 REVIEW_DIR="$GLOBAL_ROOT/reviews/PR-$PR_NUMBER-$(echo "$PR_TITLE" | tr -cd '[:alnum:]-_' | head -c 40)"
 mkdir -p "$REVIEW_DIR"
 
 # Save PR metadata for audit
-echo "$PR_META" > "$REVIEW_DIR/pr-meta.json"
+printf '%s\n' "$PR_META" > "$REVIEW_DIR/pr-meta.json"
+printf '%s=%q\n' REVIEW_DIR "$REVIEW_DIR" >> "$AR_STATE"
 ```
 
 **Detect rule files**, try each location, collect whatever exists. Rules can live in any of these:
@@ -264,6 +318,8 @@ echo "$PR_META" > "$REVIEW_DIR/pr-meta.json"
 Build a unified rules context:
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 # globstar enables ** to match nested directories; nullglob makes non-matching
 # patterns expand to nothing instead of the literal pattern string. Without
 # both, the docs/ai-rules/**/*.md and .claude/ai-rules/**/*.md patterns silently
@@ -297,6 +353,8 @@ done
 | `.github/CODEOWNERS` | Human reviewers assigned | (informational only, don't dedup against humans) |
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 EXISTING_REVIEWERS=""
 # Explicit if/then for the CodeRabbit check. `[ A ] || [ B ] && action`
 # is a classic precedence footgun, POSIX `&&`/`||` are left-associative
@@ -391,6 +449,8 @@ The setup and test logs become **part of the review evidence** that Phase 7 read
 > 💡 **LLM directive:** The bash block below is the COMMAND CONTENT. Launch it via the Bash tool with `run_in_background: true`, do NOT run it inline. Running inline blocks Phases 6-7 for up to 5 minutes (the `timeout 300` ceiling on each setup branch), which defeats the whole point of the background-launch pattern documented above.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 SETUP_LOG="$REVIEW_DIR/env-setup.log"
 exec 3>&1 4>&2  # save stdout/stderr for status echo
 {
@@ -452,6 +512,7 @@ exec 3>&1 4>&2  # save stdout/stderr for status echo
 exec 1>&3 2>&4
 
 echo "→ Setup: $SETUP_TYPE, $([ "$SETUP_SUCCESS" = true ] && echo "OK" || echo "skipped (see $SETUP_LOG)")"
+printf '%s=%q\n' SETUP_SUCCESS "$SETUP_SUCCESS" SETUP_TYPE "$SETUP_TYPE" >> "$AR_STATE"
 ```
 
 **Port management:** when running anything that needs a port (DB, app server, mock server), find a free port and pass it via env var. Pattern:
@@ -490,9 +551,21 @@ Strategy: only run tests TOUCHED by the diff if possible (faster, more focused).
 > 💡 **LLM directive:** The bash block below is the COMMAND CONTENT. Launch it via the Bash tool with `run_in_background: true`, do NOT run it inline. The block carries `timeout 1200` (Java) / `timeout 600` (Node) ceilings; running it inline would freeze Phases 6-7 for up to 20 minutes and the parallelism documented above would be lost.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 TEST_LOG="$REVIEW_DIR/test-run.log"
 TEST_VERDICT="not-run"
 TESTS_RAN=false
+
+# Phase 4 runs in the background too and records SETUP_SUCCESS only when it ends. Wait for it,
+# bounded by its own 300s ceiling, re-reading the state; without the wait this fence reads an
+# unset value and never runs the tests.
+for _ in $(seq 1 330); do
+    [ -n "${SETUP_SUCCESS:-}" ] && break
+    sleep 1
+    . "$AR_STATE"
+done
+[ -n "${SETUP_SUCCESS:-}" ] || echo "→ Setup did not report within 330s; tests not run." >&2
 
 if [ "$SETUP_SUCCESS" = true ]; then
     {
@@ -561,6 +634,7 @@ if [ "$SETUP_SUCCESS" = true ]; then
 fi
 
 echo "→ Tests: $TEST_VERDICT"
+printf '%s=%q\n' TEST_VERDICT "$TEST_VERDICT" >> "$AR_STATE"
 ```
 
 The verdict feeds into the review as **one signal among several**, a passing test suite doesn't mean the diff is correct, and a failing one doesn't mean it's wrong (may be unrelated flake). Always report exact test names that failed when relevant.
@@ -572,6 +646,8 @@ The verdict feeds into the review as **one signal among several**, a passing tes
 Build the data the reviewer model will see.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 # Diff
 git diff "origin/$BASE_BRANCH...HEAD" > "$REVIEW_DIR/review.diff"
 
@@ -609,10 +685,11 @@ gh api "repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews" --paginate \
 MAX_ROUNDS=$(jq -r '.review.max_agent_rounds // 3' "$REPO_DIR/.claude/config_hints.json" 2>/dev/null)
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=3 ;; esac
 REVIEW_ROUND=$(jq -r .review_round "$REVIEW_DIR/round.json")
+printf '%s=%q\n' REVIEW_ROUND "$REVIEW_ROUND" MAX_ROUNDS "$MAX_ROUNDS" >> "$AR_STATE"
 if [ "$(jq -r .last_was_cap "$REVIEW_DIR/round.json")" = true ] \
    && [ "$(jq -r .head_moved_since "$REVIEW_DIR/round.json")" = false ]; then
     echo "Round cap already posted for this head; nothing new to review. Stopping."
-    return 0
+    exit 0
 fi
 ```
 
@@ -633,6 +710,7 @@ Quick summary:
 1. `git log -p -S<symbol>` over the change range → were the offending lines touched by THIS PR?
 2. `git grep <pattern>` in unchanged sibling files → does the same issue exist there too?
 3. PRE-EXISTING findings move to the draft's "Notes" section, NOT inline comments. Reframe as "this PR is a good moment to fix N other locations", never phrase as if the PR caused it.
+4. Name each PR-INTRODUCED or PR-EXPOSED finding's shape and sweep the PR's changed files and the paths they call for every other instance of it. All in-PR instances go in ONE comment ("same defect at A, B, C").
 
 Findings without a classification are rejected from the draft. This is the #1 source of low-confidence noise in v1, silently flagging pre-existing issues as if the PR introduced them.
 
@@ -654,19 +732,19 @@ Skip this check for high-confidence + high-impact findings (NPE, security, data 
 
 This is where the model does the actual reading and reasoning. Invoke the `a_sag_code_reviewer` agent if available; otherwise reason inline.
 
-**Prompt for the reviewer (you, the model, OR a subagent):**
+**Prompt for the reviewer (you, the model, OR a subagent):** the `{…}` values are filled in before the prompt is used, from the run state (`cat "$AR_STATE"` after loading it) and from the SKIP section of `{REVIEW_DIR}/project-rules-summary.md`. Phase 5 is usually still running at this point; with no `TEST_VERDICT` in the state yet, fill it with `pending (tests still running; Phase 8 adds the result)`. A subagent receives the filled-in text; it has no access to the state.
 
 ```
 You are reviewing PR #{PR_NUMBER} on {OWNER}/{REPO}: "{PR_TITLE}".
 
 INPUTS:
-  - Diff:                   $REVIEW_DIR/review.diff
-  - PR metadata:            $REVIEW_DIR/pr-meta.json
-  - Project rules summary:  $REVIEW_DIR/project-rules-summary.md
-  - Existing comments:      $REVIEW_DIR/existing-comments.json + existing-comments-issue.json
-  - Setup log:              $REVIEW_DIR/env-setup.log
-  - Test results log:       $REVIEW_DIR/test-run.log (verdict: $TEST_VERDICT)
-  - Working tree:           $(pwd)  (you may open and read any file)
+  - Diff:                   {REVIEW_DIR}/review.diff
+  - PR metadata:            {REVIEW_DIR}/pr-meta.json
+  - Project rules summary:  {REVIEW_DIR}/project-rules-summary.md
+  - Existing comments:      {REVIEW_DIR}/existing-comments.json + existing-comments-issue.json
+  - Setup log:              {REVIEW_DIR}/env-setup.log
+  - Test results log:       {REVIEW_DIR}/test-run.log (verdict: {TEST_VERDICT})
+  - Working tree:           {WORKTREE_DIR}  (you may open and read any file)
 
 REVIEW SCOPE, focus on:
   - Logical bugs introduced by the diff
@@ -678,12 +756,22 @@ REVIEW SCOPE, focus on:
   - Documentation drift (changed behaviour, docs still describe old)
 
 REVIEW SCOPE, explicitly SKIP (covered by existing automated reviewers):
-$(cat $REVIEW_DIR/project-rules-summary.md | sed -n '/Categories this review will SKIP/,/^##/p')
+{the "Categories this review will SKIP" section of {REVIEW_DIR}/project-rules-summary.md}
 
 CLASSIFICATION (mandatory per Phase 6.5, see checks/classifier.md):
   - Tag each potential finding as PR-INTRODUCED, PR-EXPOSED, or PRE-EXISTING.
   - PRE-EXISTING findings move to "Notes" (not inline). Reframe, never as
     if the PR caused them.
+
+SIBLING SWEEP (mandatory per Phase 6.5, see checks/classifier.md step 4):
+  - For every PR-INTRODUCED or PR-EXPOSED finding, name its shape (a class per the code-review rule) and
+    search the PR's changed files and the code paths they call for every other
+    instance: the other branch of the same guard, the parallel copy of the same
+    logic, the same claim restated in another file.
+  - Report every in-PR instance in ONE comment, anchored on the first, listed
+    under "Same defect at:", so the fixer closes the shape in one pass.
+  - Three or more in-PR instances of one shape become ONE Approach comment
+    (dedup step 3) that lists them and asks for one structural fix.
 
 AUTHOR INTENT (mandatory per Phase 6.6, see checks/author-intent.md):
   - Grep PR body, commit messages, referenced tickets for evidence the author
@@ -693,7 +781,7 @@ AUTHOR INTENT (mandatory per Phase 6.6, see checks/author-intent.md):
     security, data corruption).
 
 SELF-REVIEW MODE (set in Phase 0):
-  - SELF_REVIEW=$SELF_REVIEW
+  - SELF_REVIEW={SELF_REVIEW}
   - If true: ask "what would a skeptical teammate who DOESN'T know your intent ask?"
     rather than "find bugs". Lower the threshold for small things, no second pair of eyes.
 
@@ -702,15 +790,15 @@ DEDUP + CROSS-REFERENCE, for each potential comment, before drafting it:
   2. If a substantively similar comment is already posted (same file, same area,
      same root cause), DO NOT add a duplicate. Note in your private log
      "skipped: dup of #COMMENT_ID".
-  3. If an existing comment is the same CLASS as your finding (same shape over the
+  3. Across reviews: if an existing comment is the same CLASS as your finding (same shape over the
      same list, value or heuristic, in any file), do NOT add another instance.
      A class is a shape across files, not a file. Two or more findings of one class
      become ONE Approach comment that names the class and the alternative; if the PR
      already holds two findings of that class, the Approach comment says so and asks
      for the approach to change. A stream of correct instances is what spends the
      round budget.
-  3b. ROUND BUDGET: this is review round $REVIEW_ROUND of $MAX_ROUNDS from this account.
-     When $REVIEW_ROUND is above $MAX_ROUNDS, produce NO findings: the draft holds a
+  3b. ROUND BUDGET: this is review round {REVIEW_ROUND} of {MAX_ROUNDS} from this account.
+     When {REVIEW_ROUND} is above {MAX_ROUNDS}, produce NO findings: the draft holds a
      single review-body summary, the recurring class, why instances do not close it,
      the alternative, and that a human decides whether the PR continues, splits or
      changes approach, and Phase 9 posts it as the review body with no inline comments.
@@ -738,6 +826,8 @@ COMMENT FORMAT, each comment is a markdown body with this shape:
 
   {What's wrong, in 1-3 sentences.}
 
+  **Same defect at:** {every other in-PR instance as file:line, or "none found, swept {where}"}
+
   ```suggestion
   {OPTIONAL: if you can confidently write the exact replacement code, put it
    here. GitHub renders ```suggestion blocks as one-click apply buttons.
@@ -747,7 +837,7 @@ COMMENT FORMAT, each comment is a markdown body with this shape:
   {OPTIONAL: a brief AI-prompt the human can copy if they want Claude to fix
    it for them. Keep it small, 1-2 sentences max.}
 
-OUTPUT, write your review as a markdown file at $REVIEW_DIR/review-draft.md
+OUTPUT, write your review as a markdown file at {REVIEW_DIR}/review-draft.md
 in this shape:
 
   # Review: PR #{N}, {title}
@@ -837,9 +927,11 @@ Wait for the user's response. If they edit and re-show, show the diff of what ch
 Post ONE review carrying every checked comment, not one API call per comment. Each call to `pulls/{n}/comments` creates its own review object on GitHub, so five individually posted comments read as five rounds to the round-budget count on the next run. The review body carries the `<!-- ar-review round=N -->` marker that count reads.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
 # HEAD_SHA is the PR head pinned in Phase 0/1 from headRefOid. Re-derive defensively if
 # unset, from the locally pinned pull ref, never mutable origin/$HEAD_BRANCH.
-[ -z "$HEAD_SHA" ] && HEAD_SHA=$(echo "$PR_META" | jq -r '.headRefOid // empty')
+[ -z "$HEAD_SHA" ] && HEAD_SHA=$(printf '%s\n' "$PR_META" | jq -r '.headRefOid // empty')
 [ -z "$HEAD_SHA" ] && HEAD_SHA=$(git -C "$REPO_DIR" rev-parse "$PR_HEAD_REF")
 
 # Build ONE review payload from the checked comments. A comment with an empty line number
@@ -848,7 +940,7 @@ Post ONE review carrying every checked comment, not one API call per comment. Ea
 # round-cap summary from Phase 7 goes in `body` with `comments: []` (marker
 # `<!-- ar-review round=N cap -->`).
 PAYLOAD=$(mktemp)
-jq -n --arg body "Code review, $COUNT comments
+jq -n --arg body "Code review, {COUNT} comments
 
 <!-- ar-review round=$REVIEW_ROUND -->" --arg sha "$HEAD_SHA" \
   '{body: $body, event: "COMMENT", commit_id: $sha, comments: []}' > "$PAYLOAD"
@@ -880,6 +972,9 @@ Review draft saved at: $REVIEW_DIR/review-draft.md
 After posting, automatically remove the review worktree AND the local `review-pr-{N}` branch. Worktrees accumulated in v1 because cleanup defaulted to "keep"; that bloated disk and made the layout messy.
 
 ```bash
+AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
+. "$AR_STATE" || { echo "❌ No run state at $AR_STATE; start from Phase 0." >&2; exit 1; }
+cd "$REPO_DIR"   # loading the state entered the worktree; leave it before removing it
 # Invoke the script directly. The `a_g_worktree_remove` shell function defined
 # in worktree.sh is only available in interactive shells that sourced the rc
 # block. Claude Code's Bash tool calls run non-interactive, the function
@@ -914,7 +1009,7 @@ The clone at `~/ar-global-pr-reviewer/repos/$OWNER/$REPO/` is **always kept**, i
 |---|---|---|
 | "gh CLI not authenticated" | First-time use | `gh auth login` |
 | "Could not fetch PR" | Wrong URL or no access | Check URL, check `gh auth status`, verify org membership |
-| Worktree creation fails | A worktree at the path already exists | `a_g_worktree_remove review-pr-{N}` then re-run |
+| Worktree creation fails | A worktree or branch from an earlier run already exists | Run the remove command the Phase 2 abort prints, then re-run |
 | Setup hangs / times out | Project needs interactive input or unusual setup | Look at `$REVIEW_DIR/env-setup.log`; you can manually `cd $WORKTREE_DIR` and set up yourself, then re-invoke the skill, it'll skip the setup phase if `$REVIEW_DIR/env-setup.log` exists from this session |
 | Tests fail with unrelated flake | The diff didn't cause it | Mention in review notes; don't gate the review on it |
 | `gh api` post returns 422 | Likely line out of diff range (commented on a line the PR didn't touch) | Re-check that the file+line are in `git diff --name-only origin/$BASE...HEAD` |
