@@ -798,7 +798,18 @@ surfaced: {each finding with file:line and the answered comment it affects | non
 
 **Before the push:**
 
-- **Interactive, with a repair commit or a surfaced finding:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or discards the round. Nothing is pushed yet, so discarding is local: `git reset --keep {fix_base}`, then end the run with `STOPPED: fix round {round_number} discarded before push; nothing posted.` This ending comes before Phases 5 and 6 and leaves the checkout at the PR head, so the next run starts cleanly.
+- **Interactive, with a repair commit or a surfaced finding:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or discards the round. Nothing is pushed yet, so discarding is local, in two steps the git guard allows (it refuses the reset modes that also rewrite the tree):
+
+  ```bash
+  git reset --soft {fix_base}
+  ```
+
+  ```bash
+  # Restore exactly the paths the round changed; a file the round added is removed.
+  git diff -z --name-only --cached {fix_base} | xargs -0 git restore --source={fix_base} --staged --worktree --
+  ```
+
+  Then end the run with `STOPPED: fix round {round_number} discarded before push; nothing posted.` This ending comes before Phases 5 and 6 and leaves the checkout at the PR head, so the next run starts cleanly.
 - **Otherwise:** push HEAD.
 
 Either way the push is the whole of HEAD: commits are never amended or dropped. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply instead of `Fixed in`, and its thread stays open. Its marker still names the round's pushed commit, so a round whose answered findings were all surfaced is counted like any other. Every Phase 6 ending quotes the block whenever it surfaced anything.
