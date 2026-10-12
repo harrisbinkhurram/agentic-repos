@@ -247,14 +247,12 @@ INPUT="$PR_NUMBER" source "$WT_DIR/a_g_worktree_review" "$PR_NUMBER"
 # this is a worktree other than the main clone and that it sits at the pinned head.
 WORKTREE_DIR="$(pwd)"
 if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
-    # The remove command, runnable as printed: the helper's shell function does not exist in a
-    # non-interactive shell, and the script must run inside the clone.
+    # Plain git, runnable as printed: it clears a leftover worktree (even one whose directory is
+    # gone), a leftover branch with no worktree, or both.
     WT_PATH="$GLOBAL_ROOT/repos/$OWNER/WorkTrees/$REPO/review-pr-$PR_NUMBER"
-    RM_CMD="cd \"$REPO_DIR\" && bash \"${AGENTIC_DEVKIT_DIR:-$HOME/agentic-devkit}/scripts/a_g_worktree_remove\" --force review-pr-$PR_NUMBER"
-    RM_FALLBACK="git -C \"$REPO_DIR\" worktree remove --force \"$WT_PATH\"; git -C \"$REPO_DIR\" branch -D review-pr-$PR_NUMBER"
+    RM_CMD="git -C \"$REPO_DIR\" worktree remove --force \"$WT_PATH\"; git -C \"$REPO_DIR\" branch -D review-pr-$PR_NUMBER"
     echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
     echo "    Remove any review-pr-$PR_NUMBER worktree or branch it left: $RM_CMD" >&2
-    echo "    (if that stops on a clone with no local main or master: $RM_FALLBACK)" >&2
     echo "    Then: an earlier run's leftover, re-run Phase 2; a closed, merged or fork PR, which the helper cannot check out, use the inline fence below, which checks out the pinned head." >&2
     exit 1
 fi
@@ -273,7 +271,7 @@ LOCAL_REVIEW_BRANCH="review-pr-$PR_NUMBER"
 if [ ! -d "$WORKTREE_DIR" ]; then
     # Check out the pinned head commit, not the mutable origin/$HEAD_BRANCH.
     git -C "$REPO_DIR" worktree add -b "$LOCAL_REVIEW_BRANCH" "$WORKTREE_DIR" "$HEAD_SHA" || {
-        echo "❌ Could not create $WORKTREE_DIR. If branch $LOCAL_REVIEW_BRANCH exists from an earlier attempt, delete it and re-run this fence: git -C \"$REPO_DIR\" branch -D $LOCAL_REVIEW_BRANCH" >&2
+        echo "❌ Could not create $WORKTREE_DIR. If branch $LOCAL_REVIEW_BRANCH exists from an earlier attempt, remove it and re-run this fence: git -C \"$REPO_DIR\" worktree remove --force \"$WORKTREE_DIR\"; git -C \"$REPO_DIR\" branch -D $LOCAL_REVIEW_BRANCH" >&2
         exit 1
     }
 fi
@@ -1010,7 +1008,7 @@ The clone at `~/ar-global-pr-reviewer/repos/$OWNER/$REPO/` is **always kept**, i
 |---|---|---|
 | "gh CLI not authenticated" | First-time use | `gh auth login` |
 | "Could not fetch PR" | Wrong URL or no access | Check URL, check `gh auth status`, verify org membership |
-| Worktree creation fails | A worktree at the path already exists | `a_g_worktree_remove review-pr-{N}` then re-run |
+| Worktree creation fails | A worktree or branch from an earlier run already exists | Run the remove command the Phase 2 abort prints, then re-run |
 | Setup hangs / times out | Project needs interactive input or unusual setup | Look at `$REVIEW_DIR/env-setup.log`; you can manually `cd $WORKTREE_DIR` and set up yourself, then re-invoke the skill, it'll skip the setup phase if `$REVIEW_DIR/env-setup.log` exists from this session |
 | Tests fail with unrelated flake | The diff didn't cause it | Mention in review notes; don't gate the review on it |
 | `gh api` post returns 422 | Likely line out of diff range (commented on a line the PR didn't touch) | Re-check that the file+line are in `git diff --name-only origin/$BASE...HEAD` |
