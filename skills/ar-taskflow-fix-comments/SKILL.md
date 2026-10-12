@@ -806,14 +806,15 @@ surfaced: {each finding with file:line and the answered comment it affects | non
 
   ```bash
   # Restore exactly the paths the round changed; a file the round added is removed.
-  # --no-renames lists both sides of a rename, so the old name comes back too.
-  git diff -z --no-renames --name-only --cached {fix_base} | xargs -0 git restore --source={fix_base} --staged --worktree --
+  # --no-renames lists both sides of a rename, so the old name comes back too; --literal-pathspecs
+  # keeps a name starting with ':' or holding a glob character from being read as a pattern.
+  git diff -z --no-renames --name-only --cached {fix_base} | xargs -0 git --literal-pathspecs restore --source={fix_base} --staged --worktree --
   ```
 
   Then end the run with `STOPPED: fix round {round_number} discarded before push; nothing posted.` This ending comes before Phases 5 and 6 and leaves the checkout at the PR head, so the next run starts cleanly.
 - **Otherwise:** push HEAD.
 
-Either way the push is the whole of HEAD: commits are never amended or dropped. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply instead of `Fixed in`, and its thread stays open. Its marker still names the round's pushed commit, so a round whose answered findings were all surfaced is counted like any other. Every Phase 6 ending quotes the block whenever it surfaced anything.
+A push is always the whole of HEAD: pushed commits are never amended or dropped. Only an unpushed round is discarded, as above. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply instead of `Fixed in`, and its thread stays open. Its marker still names the round's pushed commit, so a round whose answered findings were all surfaced is counted like any other. Every Phase 6 ending quotes the block whenever it surfaced anything.
 
 This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every `Fixed` reply and every marker that names a commit cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
 
