@@ -806,7 +806,8 @@ surfaced: {each finding with file:line and the answered comment it affects | non
 
   ```bash
   # Restore exactly the paths the round changed; a file the round added is removed.
-  git diff -z --name-only --cached {fix_base} | xargs -0 git restore --source={fix_base} --staged --worktree --
+  # --no-renames lists both sides of a rename, so the old name comes back too.
+  git diff -z --no-renames --name-only --cached {fix_base} | xargs -0 git restore --source={fix_base} --staged --worktree --
   ```
 
   Then end the run with `STOPPED: fix round {round_number} discarded before push; nothing posted.` This ending comes before Phases 5 and 6 and leaves the checkout at the PR head, so the next run starts cleanly.
