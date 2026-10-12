@@ -17,7 +17,7 @@ search per finding for other instances of its shape.
   and adds "Review the fix delta": `a_sag_code_reviewer` reviews `{fix_base}..HEAD` before push.
   Bug / Security / Missing findings get one repair commit; anything still flagged or needing a
   decision is surfaced, not looped: a "Fix-delta review" block in the Phase 4 output and every
-  Phase 6 ending, approval before the push when interactive, and a `Needs human review` reply on
+  Phase 6 ending, approval before the push when interactive (otherwise the push does not wait), and a `Needs human review` reply on
   the affected finding. The check posts nothing and writes no round marker, so it does not count
   against the round budget. Phase 3 gains an "Outside this PR" section. Phase 5 reverts the whole
   round (`{fix_base}..HEAD`), since a round can now hold a repair commit. Every fence that calls
@@ -33,8 +33,9 @@ search per finding for other instances of its shape.
   including those in `checks/classifier.md` and `checks/author-intent.md`, loads it, since each
   Bash call is a fresh shell. Loading it after Phase 2 enters the review worktree. Fences stop with
   `exit` instead of a top-level `return`, and PR metadata is piped with `printf '%s\n'` instead of
-  `echo`, which rewrites backslash escapes in zsh. Lists of files and reviewer logins are read line
-  by line into arguments, since zsh does not word-split an unquoted variable.
+  `echo`, which rewrites backslash escapes in zsh. Changed files are read NUL-separated into
+  literal pathspecs, and reviewer logins line by line, since zsh does not word-split an unquoted
+  variable.
 
 ## v1.3.1, 2026-10-11
 

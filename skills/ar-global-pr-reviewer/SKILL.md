@@ -278,6 +278,7 @@ fi
 cd "$WORKTREE_DIR" || exit 1
 if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
     echo "❌ $WORKTREE_DIR is not at the PR head $HEAD_SHA (a stale worktree from an earlier run?)." >&2
+    echo "    Remove it and re-run this fence: git -C \"$REPO_DIR\" worktree remove --force \"$WORKTREE_DIR\"; git -C \"$REPO_DIR\" branch -D $LOCAL_REVIEW_BRANCH" >&2
     exit 1
 fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"

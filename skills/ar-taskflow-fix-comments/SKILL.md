@@ -798,12 +798,12 @@ surfaced: {each finding with file:line and the answered comment it affects | non
 
 **Before the push:**
 
-- **Interactive:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or reverts the round with `git revert --no-commit {fix_base}..HEAD && git commit -m "Revert PR feedback round {round_number}"` and stops.
-- **Unattended:** push HEAD.
+- **Interactive, with a repair commit or a surfaced finding:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or discards the round. Nothing is pushed yet, so discarding is local: `git reset --keep {fix_base}`, then end the run with `STOPPED: fix round {round_number} discarded before push; nothing posted.` This ending comes before Phases 5 and 6 and leaves the checkout at the PR head, so the next run starts cleanly.
+- **Otherwise:** push HEAD.
 
 Either way the push is the whole of HEAD: commits are never amended or dropped. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply instead of `Fixed in`, and its thread stays open. Its marker still names the round's pushed commit, so a round whose answered findings were all surfaced is counted like any other. Every Phase 6 ending quotes the block whenever it surfaced anything.
 
-This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every `Fixed` reply and every marker in this round cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
+This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every `Fixed` reply and every marker that names a commit cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
 
 ```bash
 # Explicit remote + refspec, not a bare `git push`. The Pre-Flight gate has already
@@ -1010,7 +1010,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
        1. Fix the failing tests now (then re-run)
        2. Revert this round's commits and investigate
        ```
-       Option 1: fix, commit, re-run. Option 2: the same single revert commit, and stop. There is no
+       Option 1: fix, commit, re-run. Option 2: the same single revert commit, pushed, and stop; an unpushed revert leaves the next run's Pre-Flight unable to fast-forward. There is no
        "skip tests" option: 5a's stated-scope judgement is the only way to discharge this
        phase, and it is made before the run, not after a red result.
 
