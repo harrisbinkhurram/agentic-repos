@@ -399,7 +399,7 @@ Then record the class in the Phase 3 report under **Approach problems**, which i
 
 The third finding is often correct, and that is not what this rule tests. It tests whether fixing one more instance changes the outcome. Where the answer is no, the reply above is the useful one and another fix is not.
 
-**Several instances in one round are one class too.** When a single review delivers three or more findings of one shape, do not fix them one by one. Either make ONE structural fix (the list becomes a pattern, the restated number becomes a reference to its source, the special cases become a rule) and reply `Fixed in {sha} (structural: {what}; covers #{ids})` on the first with `Same class as #{first_id}` on the rest, or use the `Not fixing as an instance` reply on the first and `Same class as #{first_id}` on the rest. Nineteen findings of one shape answered with nineteen fixes is the failure this whole section exists to stop.
+**Several instances in one round are one class too.** When a single review delivers three or more findings of one shape, or one finding lists three or more instances (a reviewer's "Same defect at:"), or the Phase 2 sweep finds three or more, do not fix them one by one. Either make ONE structural fix (the list becomes a pattern, the restated number becomes a reference to its source, the special cases become a rule) and reply `Fixed in {sha} (structural: {what}; covers #{ids})` on the first with `Same class as #{first_id}` on the rest, or use the `Not fixing as an instance` reply on the first and `Same class as #{first_id}` on the rest. Nineteen findings of one shape answered with nineteen fixes is the failure this whole section exists to stop.
 
 ### Review Staleness (check before trusting any bot verdict)
 
@@ -538,6 +538,12 @@ Skip this source entirely when `bot_state` is `none` or `skipped`, there are no 
 ```bash
 # Pipe to a real jq: `gh api --jq` takes the expression only and does not accept --arg,
 # and $bot_login is configurable (see Review Staleness above).
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
+bot_login=${bot_login-$(jq -r '.review.bot_login // "coderabbitai[bot]"' .claude/config_hints.json 2>/dev/null)}
+[ "$bot_login" = "null" ] && bot_login=""
 gh api repos/$repo_owner/$repo_name/pulls/$pr_number/comments --paginate \
   | jq -s --arg b "$bot_login" 'add // [] | [.[] | select(.user.login == $b) | {
     id: .id,
@@ -562,6 +568,10 @@ Parse each comment body to extract:
 ### Source C: Human Reviewer Comments
 
 ```bash
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
 # Inline review comments (excluding bots)
 gh api repos/$repo_owner/$repo_name/pulls/$pr_number/comments \
   --jq '[.[] | select(.user.login != "coderabbitai[bot]" and .user.type != "Bot") | {
@@ -605,6 +615,15 @@ Processing in priority order...
 ## Phase 2, Fix in Priority Order
 
 **Classify every real defect before fixing it**, per `<standards_location>/failure-classification.md`: make the non-code repairs its class requires first (requirement, assumption, or check), then fix the code, and record it where that rule says. Style and readability findings are not classified. If the file is missing, the project predates framework v1.3.0: fix as below and say once in the Phase 3 report that `ar-upgrade` adds it.
+
+**Sweep the shape before committing any fix.** A finding names one instance; the PR may hold more. Name the finding's shape (a class, per Phase 1 → Round Number and Same-Class Detection), then search the PR's changed files and the code paths they call for every other instance: the other branch of the same guard, the parallel copy of the same logic, the same claim restated in another file. Fix every in-PR instance in the same commit and name them in the reply (`Fixed in {sha}, also at {file:line, …}`). An instance outside the PR's changes is listed under **Outside this PR** in the Phase 3 report, not fixed here. This runs on the first finding of a shape; the class rules in Phase 1 still govern a shape that already has findings on the PR, and a sweep that finds three or more in-PR instances falls under Phase 1's several-instances rule (one structural fix, or one `Not fixing as an instance` reply).
+
+```bash
+# Every Bash call is a fresh shell. `gh pr diff` needs no local base ref, so a stale or
+# unfetched base branch cannot widen the scope.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+gh pr diff "$pr_number" --name-only   # the PR's changed files, the sweep's scope
+```
 
 ### Priority 1: SonarQube (highest confidence)
 
@@ -698,6 +717,11 @@ Round Number and Same-Class Detection:}
 source of truth for this value | a scope split}
 {If none:} none, no finding class has repeated on this PR
 
+### Outside this PR ({n})
+{For each instance the Phase 2 sweep found outside the PR's changed files:}
+{file}:{line}, same shape as {finding}
+{If none:} none
+
 ### Failure classes ({n})
 {For each classified defect:}
 {file}:{line}, {class}, revised: {artifact other than the code, or "code only"}
@@ -730,16 +754,81 @@ git rev-parse HEAD    # -> {fix_base}; state this sha in the Phase 4 output, 5a 
 
 git add {fixed_files}
 git commit -m "[{namespace}-XXX] Fix PR feedback (iteration {n}): {n} SonarQube, {n} CodeRabbit, {n} reviewer issues"
-# Explicit remote + refspec, not a bare `git push`. The Pre-Flight gate has already
-# asserted current_branch == pr_head_branch and that its upstream is origin/$pr_head_branch,
-# so this is belt-and-braces: it names the destination instead of inheriting whatever
-# upstream the local branch happens to carry.
-git push origin "HEAD:$pr_head_branch"
 ```
 
 Stage only the files you actually fixed, never `git add -A` / `git add .`. The Pre-Flight clean-tree gate makes a blanket add *look* safe, but it would also pick up anything the fix run itself produced as a side effect (build output, generated reports).
 
 Follow the Post-Review Fix Commits rule from the ar-taskflow skill: no force push, no amend.
+
+### Review the fix delta (before push)
+
+Skip this step only when `review.fix_delta_review` is `false` in `config_hints.json` (default `true`), and say so in the Phase 4 output.
+
+```bash
+# Not `// true`: jq's alternative operator treats `false` as absent, so the opt-out would never fire.
+fix_delta_review=$(jq -r 'if .review.fix_delta_review == false then "false" else "true" end' .claude/config_hints.json 2>/dev/null)
+if [ "$fix_delta_review" = false ]; then
+  echo "Fix-delta review skipped (review.fix_delta_review=false)."   # print the block below, then go to the push
+else
+  git diff {fix_base}..HEAD    # the delta under review: every line this round wrote, tests and docs included
+fi
+```
+
+**INVOKE AGENT: a_sag_code_reviewer (fresh context, foreground)** via the Task tool (subagent_type: `a_sag_code_reviewer`). Give it the delta above, the findings this round answered, `<standards_location>/`, and the PR's changed-file list (`gh pr diff "${pr_number:-$(gh pr view --json number -q .number)}" --name-only`). It reviews the delta, and may read the listed files in full only to answer question 2. Ask it two things:
+
+1. Does the delta introduce a defect of its own: a new test that leaks state or exercises the wrong path, a doc that names the wrong thing, a guard that misses a case, an edit that breaks its callers?
+2. Does the shape of each answered finding still occur elsewhere in the PR's changed files (the Phase 2 sweep, checked by a second reader)?
+
+Then:
+
+| Result | Action |
+|--------|--------|
+| No Bug / Security / Missing finding | Go to the push |
+| Bug / Security / Missing finding | Fix it in ONE repair commit, then re-review only that commit. No second repair |
+| Still flagged after the repair, or the finding needs a decision (scope, approach, intent) | Do not loop. Record it as **surfaced** (below) |
+| Style or readability only | Fix it if trivial, otherwise drop it |
+
+Print this block in the Phase 4 output, even when the step was skipped or found nothing:
+
+```
+### Fix-delta review
+{ran | skipped (review.fix_delta_review=false)}, repair commit {sha | none},
+surfaced: {each finding with file:line and the answered comment it affects | none}
+```
+
+**Before the push:**
+
+- **Interactive, with a repair commit or a surfaced finding:** show the block, plus the repair commit's diff when there is one, and wait for approval. The user pushes as is, or discards the round. Nothing is pushed yet, so discarding is local, in two steps the git guard allows (it refuses the reset modes that also rewrite the tree):
+
+  ```bash
+  git reset --soft {fix_base}
+  ```
+
+  ```bash
+  # Restore exactly the paths the round changed; a file the round added is removed.
+  # --no-renames lists both sides of a rename, so the old name comes back too; --literal-pathspecs
+  # keeps a name starting with ':' or holding a glob character from being read as a pattern.
+  git diff -z --no-renames --name-only --cached {fix_base} | xargs -0 git --literal-pathspecs restore --source={fix_base} --staged --worktree --
+  ```
+
+  Then end the run with `STOPPED: fix round {round_number} discarded before push; nothing posted.` This ending comes before Phases 5 and 6 and leaves the checkout at the PR head, so the next run starts cleanly.
+- **Otherwise:** push HEAD.
+
+A push is always the whole of HEAD: pushed commits are never amended or dropped. Only an unpushed round is discarded, as above. An answered finding that has a surfaced finding against it gets the `Needs human review: {what the delta review found}` reply instead of `Fixed in`, and its thread stays open. Its marker still names the round's pushed commit, so a round whose answered findings were all surfaced is counted like any other. Every Phase 6 ending quotes the block whenever it surfaced anything.
+
+This check is internal to the round. It posts nothing to the PR and writes no `ar-review` or `ar-fix` marker. A repair commit belongs to the round it repairs: every `Fixed` reply and every marker that names a commit cites the round's final commit, so Phase 1 counts one fix sha for the round, and the marker carries the same `round={round_number}`. Phase 5a's `{fix_base}` already covers the repair commit.
+
+```bash
+# Explicit remote + refspec, not a bare `git push`. The Pre-Flight gate has already
+# asserted current_branch == pr_head_branch and that its upstream is origin/$pr_head_branch,
+# so this is belt-and-braces: it names the destination instead of inheriting whatever
+# upstream the local branch happens to carry.
+# Re-derive: the delta review and any approval wait put this push in a fresh shell, where an
+# unset pr_head_branch turns the refspec into `HEAD:`.
+pr_head_branch=${pr_head_branch:-$(gh pr view "${pr_number:-$(gh pr view --json number -q .number)}" --json headRefName -q .headRefName)}
+[ -n "$pr_head_branch" ] || { echo "Could not resolve the PR head branch; not pushing." >&2; exit 1; }
+git push origin "HEAD:$pr_head_branch"
+```
 
 ### Reply on PR
 
@@ -749,7 +838,7 @@ Follow the Post-Review Fix Commits rule from the ar-taskflow skill: no force pus
 <!-- ar-fix round={round_number} commit={sha} -->
 ```
 
-`{sha}` is the fix commit for `Fixed` / `Fixed forward`, and `none` for every other disposition. Phase 1 counts fix rounds from these markers (a marker with a real commit is a fix round, `none` is not), the reviewer reads them too, and they are invisible in the rendered comment. Without them the round has to be parsed out of prose, which breaks on a backtick. The reviewer side of this exchange posts its own `<!-- ar-review round={n} -->` marker in the review body; the two markers are what let a fresh session compute the same round number.
+`{sha}` is the fix commit for `Fixed` / `Fixed forward`, the round's pushed commit for a `Needs human review` reply from the Phase 4 fix-delta review, and `none` for every other disposition. Phase 1 counts fix rounds from these markers (a marker with a real commit is a fix round, `none` is not), the reviewer reads them too, and they are invisible in the rendered comment. Without them the round has to be parsed out of prose, which breaks on a backtick. The reviewer side of this exchange posts its own `<!-- ar-review round={n} -->` marker in the review body; the two markers are what let a fresh session compute the same round number.
 
 Replies serve as **iteration markers**, they let the next run know which comments are already handled.
 
@@ -763,6 +852,10 @@ Replies serve as **iteration markers**, they let the next run know which comment
 | Any source, on a **MERGED / CLOSED** PR | Reply: "Fixed forward in #{followup_pr} ({commit_sha}), {brief description}". **Do not use the plain "Fixed in {sha}" form**: on a merged PR it reads as fixed *in that PR*, which is false, the commit is on a different branch. Name the follow-up PR so the fix is findable. If the follow-up is not open yet, state where it is going ("Fixing forward in a follow-up PR into `{base_branch}`") rather than implying this PR carries the fix |
 
 ```bash
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
 # Reply to a PR comment
 gh api repos/$repo_owner/$repo_name/pulls/$pr_number/comments/{comment_id}/replies \
   -f body="{reply_text}"
@@ -822,6 +915,10 @@ Pushing fixes does not tell anyone the PR is ready to look at again. GitHub only
 Bots, the PR author and the account running this skill are always left out: GitHub refuses a review request to the author, and bots re-review on push by themselves.
 
 ```bash
+# Fresh shell: re-derive the inputs, as Phase 1 does.
+pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+repo_name=${repo_name:-$(gh repo view --json name -q .name)}
 pr_author=$(gh pr view "$pr_number" --json author -q .author.login)
 me=$(gh api user -q .login)
 prev_reviewers=$(gh api "repos/$repo_owner/$repo_name/pulls/$pr_number/reviews" --paginate \
@@ -834,14 +931,16 @@ if [ -z "$prev_reviewers" ]; then
   fi
 fi
 [ -z "$prev_reviewers" ] && echo "No reviewer to re-request (none reviewed, no usable review.default_reviewer)."
-for r in $prev_reviewers; do
+# One login per line; read them one by one, since zsh does not word-split an unquoted $prev_reviewers.
+while IFS= read -r r; do
+  [ -n "$r" ] || continue
   if gh api -X POST "repos/$repo_owner/$repo_name/pulls/$pr_number/requested_reviewers" \
        -f "reviewers[]=$r" >/dev/null; then
     echo "Re-requested review from @$r"
   else
     echo "Could not re-request review from @$r"
   fi
-done
+done < <(printf '%s\n' "$prev_reviewers")
 ```
 
 Report the result in the Phase 4 output. A failed request is reported, never retried through another account.
@@ -865,7 +964,7 @@ the widest scope any of them earned, and run that once.
 
 **The base is `{fix_base}`, the sha the branch was at before this round's first fix commit.** Phase 4 captures and records it; substitute the recorded value literally here, the same way `{pr_number}` and `{comment_id}` are substituted. It is **not** a shell variable at this point: every Bash tool call starts a new shell, so `$fix_base` from Phase 4's block expands to empty and `git diff --name-only ""` aborts with `fatal: ambiguous argument ''`. That matters more here than for the other cross-block values in this skill, `pr_number` and `pr_head_branch` can be re-derived from the PR at any time, but a pre-commit sha cannot be recovered once the commit lands, and the obvious recovery from that git failure is `HEAD~1`, the one substitute the reason below rules out.
 
-Not `HEAD~1`: it is the round base only while the round makes exactly one commit, which is what Phase 4 does today. A pinned sha stays correct if a re-fix after a failed verification adds a second commit, the case where `HEAD~1` would silently drop the first fix out of scope, and a migration fixed one commit earlier would be verified as though it had never been touched.
+Not `HEAD~1`: a round can make more than one commit (the Phase 4 repair commit, a re-fix after a failed verification), and `HEAD~1` would then silently drop the first fix out of scope, and a migration fixed one commit earlier would be verified as though it had never been touched.
 
 ```bash
 git diff --name-only {fix_base}          # every path this round touched
@@ -914,7 +1013,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
    - **Failures** → STOP. Show the failing tests with file:line. Then:
      - **Unattended** (prompts are suppressed, or this skill was invoked by another routine
        rather than by a person at the keyboard): attempt ONE re-fix commit and re-run. If tests
-       still fail, `git revert HEAD`, push the revert, and end this run with
+       still fail, `git revert --no-commit {fix_base}..HEAD && git commit -m "Revert PR feedback round {round_number}"`, push the revert, and end this run with
        `VERIFY FAILED: {tests}, fix reverted in {sha}; the finding(s) it answered are back open
        for a human.` Never leave a red head on the PR and never ask a question nobody is there
        to answer.
@@ -922,9 +1021,9 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
        ```
        Integration tests failed after fixing PR feedback: {list}
        1. Fix the failing tests now (then re-run)
-       2. Revert the last commit and investigate
+       2. Revert this round's commits and investigate
        ```
-       Option 1: fix, commit, re-run. Option 2: `git revert HEAD` and stop. There is no
+       Option 1: fix, commit, re-run. Option 2: the same single revert commit, pushed, and stop; an unpushed revert leaves the next run's Pre-Flight unable to fast-forward. There is no
        "skip tests" option: 5a's stated-scope judgement is the only way to discharge this
        phase, and it is made before the run, not after a red result.
 
@@ -934,7 +1033,7 @@ Judge a failure before reporting it as a regression: a diff holding nothing the 
 
 Pushing fixes is what makes CI re-run and produce new SonarQube and CodeRabbit comments on the commit just pushed. **The run is therefore not complete after the final push, and this phase is not optional.** Advising the user to re-run later does not discharge it: a sentence like "worth a second pass once CI reports" is an admission that a re-review is pending, not a substitute for handling one.
 
-Re-run the **Review Staleness** check (Phase 1) against the new head and branch on its result. Exactly four endings are allowed:
+Re-run the **Review Staleness** check (Phase 1) against the new head and branch on its result. Whichever ending is reached, it quotes the Phase 4 **Fix-delta review** block when that block surfaced anything; a surfaced finding is never folded into a clean `Complete.`. Exactly four endings are allowed:
 
 0. **Round cap, checked before the staleness result is acted on.** Read `round_number` and `max_agent_rounds` from Phase 1. When `round_number` is at or above `max_agent_rounds` and the bot or reviewer is again `behind`, do NOT re-enter Phase 1. Stop with:
    ```
@@ -949,6 +1048,13 @@ Re-run the **Review Staleness** check (Phase 1) against the new head and branch 
 
 1. **`bot_state=behind`, round cap not reached, wait budget remaining → wait for the bot re-review, BOUNDED, then re-enter Phase 1** and iterate on whatever it raised. The Phase 1 iteration awareness skips comments already handled. The wait is one Bash call with a 600s tool timeout that polls once a minute for up to `review.bot_wait_minutes` (default 10):
    ```bash
+   # Fresh shell: re-derive the inputs, as Phase 1 does.
+   pr_number=${pr_number:-$(gh pr view --json number -q .number)}
+   repo_owner=${repo_owner:-$(gh repo view --json owner -q .owner.login)}
+   repo_name=${repo_name:-$(gh repo view --json name -q .name)}
+   bot_login=${bot_login-$(jq -r '.review.bot_login // "coderabbitai[bot]"' .claude/config_hints.json 2>/dev/null)}
+   [ "$bot_login" = "null" ] && bot_login=""
+   head_oid=$(gh pr view "$pr_number" --json headRefOid -q .headRefOid)   # always re-read: the push moved the head
    bot_wait=$(jq -r '.review.bot_wait_minutes // 10' .claude/config_hints.json 2>/dev/null)
    case "$bot_wait" in ''|*[!0-9]*) bot_wait=10 ;; esac
    [ "$bot_wait" -gt 10 ] && bot_wait=10   # one tool call; a longer wait belongs to the caller
@@ -998,13 +1104,13 @@ Run Phase 7 (feed durable learnings back to rules) whenever this run finishes in
 
 **Typical iteration flow:**
 ```
-Iteration 1: Fix SonarQube + CodeRabbit comments → commit → push → verified
+Iteration 1: Fix SonarQube + CodeRabbit comments → commit → delta review → push → verified
                                                                       ↓
                                                             CI re-runs on new push
                                                                       ↓
                                         staleness check: bot reviewed < head → NOT clean
                                                                       ↓
-Iteration 2: New SonarQube issues? New CodeRabbit comments? → fix → commit → push → verified
+Iteration 2: New SonarQube issues? New CodeRabbit comments? → fix → commit → delta review → push → verified
                                                                       ↓
 Iteration 3: bot review current + nothing outstanding → done
                           OR round cap reached, review still posting → ROUND CAP (human decides)
@@ -1055,6 +1161,7 @@ ar-taskflow (Phase 0-4) → commit → push → create PR
 - `"${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/scripts/ar-sonarqube/fetch-issues.sh"`, for SonarQube (optional, installed globally by framework)
 - `SONARQUBE_URL` + `SONARQUBE_TOKEN`, for SonarQube (optional, skip if not set)
 - `jq`, for the PR snapshot parsing, the round-marker count, and the review-staleness states
+- `a_sag_code_reviewer` (agentic-devkit), for the Phase 4 fix-delta review (off with `review.fix_delta_review: false`)
 - The project's configured verify command, for Phase 5 verification (discharged, with the reason stated, when it compiles, executes, lints, or validates none of the changed files; owned by a pre-push hook where one runs it)
 
 ## Notes
