@@ -36,7 +36,9 @@ search per finding for other instances of its shape.
   `exit` instead of a top-level `return`, and PR metadata is piped with `printf '%s\n'` instead of
   `echo`, which rewrites backslash escapes in zsh. Changed files are read NUL-separated into
   literal pathspecs, and reviewer logins line by line, since zsh does not word-split an unquoted
-  variable.
+  variable. Phase 3 writes the rules context to `rules-context.md` and the detected reviewers to
+  the run state, so the summary and Phase 7's SKIP list have data, and its globs set zsh's
+  `null_glob`, since zsh aborts on a pattern that matches nothing.
 
 ## v1.3.1, 2026-10-11
 

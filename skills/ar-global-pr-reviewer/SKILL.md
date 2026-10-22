@@ -41,7 +41,7 @@ Parse the input. A bare number alone is ambiguous (no repo), ask for the URL or 
 
 Store as: `PR_URL`, `OWNER`, `REPO`, `PR_NUMBER`.
 
-**Run state.** Every Bash call is a fresh shell, so no variable survives from one fence to the next. The first fence below writes the run's values to a state file, and every later fence starts by loading it, with `{OWNER}`, `{REPO}` and `{PR_NUMBER}` substituted literally from the parse above:
+**Run state.** Every Bash call is a fresh shell, so no variable survives from one fence to the next. The Phase 0 fence that sets `PR_URL` writes the run's values to a state file, and every later fence starts by loading it with these two lines, with `{OWNER}`, `{REPO}` and `{PR_NUMBER}` substituted literally from the parse above:
 
 ```bash
 AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # see Run state
@@ -253,7 +253,7 @@ if [ "$(pwd -P)" = "$(cd "$REPO_DIR" && pwd -P)" ] || [ "$(git rev-parse HEAD)" 
     RM_CMD="git -C \"$REPO_DIR\" worktree remove --force \"$WT_PATH\"; git -C \"$REPO_DIR\" branch -D review-pr-$PR_NUMBER"
     echo "❌ Review worktree not created at the PR head (pwd=$(pwd))." >&2
     echo "    Remove any review-pr-$PR_NUMBER worktree or branch it left: $RM_CMD" >&2
-    echo "    Then: an earlier run's leftover, re-run Phase 2; a closed, merged or fork PR, which the helper cannot check out, use the inline fence below, which checks out the pinned head." >&2
+    echo "    Then: an earlier run's leftover, re-run Phase 2; the PR head moved since Phase 1 (gh pr view $PR_NUMBER --json headRefOid differs from $HEAD_SHA), restart from Phase 0; a closed, merged or fork PR, which the helper cannot check out, use the inline fence below, which checks out the pinned head." >&2
     exit 1
 fi
 printf '%s=%q\ncd "$WORKTREE_DIR"\n' WORKTREE_DIR "$WORKTREE_DIR" >> "$AR_STATE"
@@ -324,7 +324,9 @@ AR_STATE="$HOME/ar-global-pr-reviewer/state/{OWNER}-{REPO}-{PR_NUMBER}.env"   # 
 # patterns expand to nothing instead of the literal pattern string. Without
 # both, the docs/ai-rules/**/*.md and .claude/ai-rules/**/*.md patterns silently
 # skip nested rule directories on default bash.
+# zsh has no shopt and aborts on an unmatched glob unless null_glob is set; its ** already recurses.
 shopt -s globstar nullglob 2>/dev/null
+setopt null_glob 2>/dev/null
 RULES_CONTEXT=""
 for candidate in \
     CLAUDE.md AGENTS.md \
@@ -335,11 +337,16 @@ for candidate in \
     docs/conventions/*.md docs/standards/*.md
 do
     [ -f "$candidate" ] || continue
+    # ** also matches the top level, so a file can come up twice.
+    case "$RULES_CONTEXT" in *"--- $candidate ---"*) continue ;; esac
     RULES_CONTEXT="$RULES_CONTEXT
 
 --- $candidate ---
 $(cat "$candidate")"
 done
+# Kept on disk: the next fence is a fresh shell. The summary below is written from this file.
+printf '%s\n' "$RULES_CONTEXT" > "$REVIEW_DIR/rules-context.md"
+grep '^--- .* ---$' "$REVIEW_DIR/rules-context.md" || echo "No rule sources found."
 ```
 
 **Detect existing reviewers** (automation already running on the PR):
@@ -365,10 +372,19 @@ EXISTING_REVIEWERS=""
 if [ -f ".coderabbit.yaml" ] || [ -f ".coderabbit.yml" ]; then
     EXISTING_REVIEWERS="$EXISTING_REVIEWERS coderabbit"
 fi
-grep -l -iE 'sonarqube|sonar-scanner' .github/workflows/*.y*ml 2>/dev/null >/dev/null && EXISTING_REVIEWERS="$EXISTING_REVIEWERS sonarqube"
-grep -l -iE '\b(lint|format|prettier|eslint|checkstyle|spotbugs)\b' .github/workflows/*.y*ml 2>/dev/null >/dev/null && EXISTING_REVIEWERS="$EXISTING_REVIEWERS linters"
-grep -l -i 'codeql' .github/workflows/*.y*ml 2>/dev/null >/dev/null && EXISTING_REVIEWERS="$EXISTING_REVIEWERS codeql"
+# Workflow files into "$@": an unmatched glob aborts zsh, and with no file arguments grep would
+# read stdin, so the greps run only when at least one file exists.
+shopt -s nullglob 2>/dev/null
+setopt null_glob 2>/dev/null
+set -- .github/workflows/*.y*ml
+if [ "$#" -gt 0 ]; then
+    grep -l -iE 'sonarqube|sonar-scanner' "$@" >/dev/null 2>&1 && EXISTING_REVIEWERS="$EXISTING_REVIEWERS sonarqube"
+    grep -l -iE '\b(lint|format|prettier|eslint|checkstyle|spotbugs)\b' "$@" >/dev/null 2>&1 && EXISTING_REVIEWERS="$EXISTING_REVIEWERS linters"
+    grep -l -i 'codeql' "$@" >/dev/null 2>&1 && EXISTING_REVIEWERS="$EXISTING_REVIEWERS codeql"
+fi
 EXISTING_REVIEWERS="$(echo "$EXISTING_REVIEWERS" | xargs)"  # trim
+printf '%s=%q\n' EXISTING_REVIEWERS "$EXISTING_REVIEWERS" >> "$AR_STATE"
+echo "Existing reviewers: ${EXISTING_REVIEWERS:-none}"
 ```
 
 **Categories to SKIP based on detected tools** (so we don't post stuff a bot already caught):
@@ -390,7 +406,7 @@ EXISTING_REVIEWERS="$(echo "$EXISTING_REVIEWERS" | xargs)"  # trim
 - Cross-file consistency (changed name in file A, callers in file B not updated)
 - Documentation drift (changed behaviour, docstring still describes old behaviour)
 
-Save the rules + reviewers summary to `$REVIEW_DIR/project-rules-summary.md` for audit:
+Save the rules + reviewers summary to `$REVIEW_DIR/project-rules-summary.md` for audit, written from `$REVIEW_DIR/rules-context.md` and the `EXISTING_REVIEWERS` value printed above:
 
 ```markdown
 # Project rules + reviewer context, PR #{N}
@@ -771,7 +787,7 @@ SIBLING SWEEP (mandatory per Phase 6.5, see checks/classifier.md step 4):
   - Report every in-PR instance in ONE comment, anchored on the first, listed
     under "Same defect at:", so the fixer closes the shape in one pass.
   - Three or more in-PR instances of one shape become ONE Approach comment
-    (dedup step 3) that lists them and asks for one structural fix.
+    (checks/classifier.md step 4) that lists them and asks for one structural fix.
 
 AUTHOR INTENT (mandatory per Phase 6.6, see checks/author-intent.md):
   - Grep PR body, commit messages, referenced tickets for evidence the author
